@@ -45,7 +45,7 @@ local selectedConfigKey = "Default.cfg"
 --------------------------------------------------------------------------------
 
 local currentRgb = Color3.fromRGB(0, 245, 215)
-local rgbObjects = {} -- Holds UIStrokes, fills, and labels that update with RGB
+local rgbObjects = {}
 
 local function registerRgb(inst, prop)
 	table.insert(rgbObjects, { Instance = inst, Property = prop })
@@ -64,7 +64,7 @@ RunService.RenderStepped:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- 3. SCREEN GUI & FLOATING FLOWER (🌸) BUBBLE
+-- 3. SCREEN GUI & FLOATING BUBBLE
 --------------------------------------------------------------------------------
 
 local playerGui = player:WaitForChild("PlayerGui")
@@ -76,7 +76,7 @@ screenGui.IgnoreGuiInset = true
 screenGui.DisplayOrder = 999
 screenGui.Parent = playerGui
 
--- Floating Draggable Flower Bubble (Appears when [X] is tapped)
+-- Floating Draggable Bubble (Appears when [X] is clicked)
 local flowerBubble = Instance.new("Frame")
 flowerBubble.Name = "FlowerBubble"
 flowerBubble.Size = UDim2.new(0, 48, 0, 48)
@@ -89,7 +89,7 @@ flowerBubble.ZIndex = 20
 flowerBubble.Parent = screenGui
 
 local flowerCorner = Instance.new("UICorner")
-flowerCorner.CornerRadius = UDim.new(1, 0) -- Full circle
+flowerCorner.CornerRadius = UDim.new(1, 0)
 flowerCorner.Parent = flowerBubble
 
 local flowerStroke = Instance.new("UIStroke")
@@ -122,7 +122,7 @@ fovCorner.Parent = fovCircle
 
 local fovStroke = Instance.new("UIStroke")
 fovStroke.Thickness = 1.2
-fovStroke.Transparency = 0.75 -- Semi-transparent so it does not block vision
+fovStroke.Transparency = 0.75
 fovStroke.Parent = fovCircle
 registerRgb(fovStroke, "Color")
 
@@ -278,7 +278,7 @@ tabCfgLabel.ZIndex = 14
 tabCfgLabel.Parent = tabCfgBtn
 
 --------------------------------------------------------------------------------
--- 5. DRAG LOGIC (FOR MAIN WINDOW AND FLOWER BUBBLE)
+-- 5. DRAG LOGIC & INTERFACE TOGGLES
 --------------------------------------------------------------------------------
 
 local function makeDraggable(triggerFrame, targetFrame)
@@ -316,7 +316,6 @@ end
 makeDraggable(header, mainWindow)
 makeDraggable(flowerBubble, flowerBubble)
 
--- Window Minimize / Hide / Restore interactions
 local isMinimized = false
 minBtn.InputEnded:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -359,7 +358,6 @@ aimPage.BackgroundTransparency = 1
 aimPage.ZIndex = 12
 aimPage.Parent = windowBody
 
--- Helper: Creates Checkbox Row
 local function createCheckbox(parent, posY, text, defaultVal, callback)
 	local row = Instance.new("Frame")
 	row.Size = UDim2.new(1, 0, 0, 22)
@@ -511,7 +509,7 @@ torsoBtn.InputEnded:Connect(function(input)
 	end
 end)
 
--- Helper: Creates "Volume-Style" Draggable Sliders
+-- Volume-Style Sliders
 local function createSlider(parent, posY, title, minVal, maxVal, currentVal, isPercent, callback)
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.new(1, 0, 0, 14)
@@ -613,7 +611,6 @@ cfgPage.Visible = false
 cfgPage.ZIndex = 12
 cfgPage.Parent = windowBody
 
--- Tab Switching logic
 tabAimBtn.InputEnded:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
 		aimPage.Visible = true
@@ -636,7 +633,6 @@ tabCfgBtn.InputEnded:Connect(function(input)
 	end
 end)
 
--- Config Name Input Bar & Dropdown Arrow [▼]
 local cfgInputRow = Instance.new("Frame")
 cfgInputRow.Size = UDim2.new(1, 0, 0, 26)
 cfgInputRow.Position = UDim2.new(0, 0, 0, 0)
@@ -678,7 +674,6 @@ arrowLabel.TextColor3 = COLOR_TEXT
 arrowLabel.ZIndex = 15
 arrowLabel.Parent = dropdownArrow
 
--- Dropdown Scrolling List
 local dropdownScroll = Instance.new("ScrollingFrame")
 dropdownScroll.Size = UDim2.new(1, 0, 0, 65)
 dropdownScroll.Position = UDim2.new(0, 0, 0, 30)
@@ -742,7 +737,6 @@ dropdownArrow.InputEnded:Connect(function(input)
 	end
 end)
 
--- Status Feedback Label
 local statusLabel = Instance.new("TextLabel")
 statusLabel.Size = UDim2.new(1, 0, 0, 14)
 statusLabel.Position = UDim2.new(0, 0, 1, -16)
@@ -755,7 +749,6 @@ statusLabel.TextXAlignment = Enum.TextXAlignment.Center
 statusLabel.ZIndex = 13
 statusLabel.Parent = cfgPage
 
--- Button Builder Helper
 local function createButton(parent, pos, size, text, color)
 	local btn = Instance.new("Frame")
 	btn.Size = size
@@ -780,7 +773,6 @@ local function createButton(parent, pos, size, text, color)
 	return btn
 end
 
--- Create Config Button
 local createBtn = createButton(cfgPage, UDim2.new(0, 0, 0, 100), UDim2.new(1, 0, 0, 24), "+ CREATE CONFIG", COLOR_LIGHT_DARK)
 createBtn.InputEnded:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -802,7 +794,6 @@ createBtn.InputEnded:Connect(function(input)
 	end
 end)
 
--- Action Buttons: [ LOAD ], [ REWRITE ], [ DELETE ]
 local loadBtn = createButton(cfgPage, UDim2.new(0, 0, 0, 130), UDim2.new(0.31, 0, 0, 24), "LOAD")
 loadBtn.InputEnded:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -815,7 +806,6 @@ loadBtn.InputEnded:Connect(function(input)
 			settings.Smoothness = cfg.Smoothness
 			settings.FovRadius = cfg.FovRadius
 
-			-- Update UI elements
 			masterCb.Set(cfg.Enabled)
 			fovCb.Set(cfg.DrawFov)
 			teamCb.Set(cfg.TeamCheck)
@@ -871,13 +861,38 @@ deleteBtn.InputEnded:Connect(function(input)
 end)
 
 --------------------------------------------------------------------------------
--- 8. TARGET SCANNING & SMOOTH CAMERA TRACKING ENGINE
+-- 8. TARGET SCANNING & CAMERA ENGINE
 --------------------------------------------------------------------------------
 
 local rayParams = RaycastParams.new()
 rayParams.FilterType = Enum.RaycastFilterType.Exclude
 
--- Finds the closest valid enemy inside the screen FOV circle who passes line-of-sight
+-- Validates whether another player is considered an enemy
+local function isEnemy(otherPlayer)
+	if not settings.TeamCheck then
+		return true
+	end
+
+	-- Neutral players or FFA modes are targetable
+	if player.Neutral or otherPlayer.Neutral then
+		return true
+	end
+
+	-- Check explicit Team objects
+	if player.Team ~= nil and otherPlayer.Team ~= nil then
+		return player.Team ~= otherPlayer.Team
+	end
+
+	-- Fallback to TeamColor BrickColor equality
+	if player.TeamColor ~= nil and otherPlayer.TeamColor ~= nil then
+		return player.TeamColor ~= otherPlayer.TeamColor
+	end
+
+	-- Safe fallback when teams cannot be resolved
+	return false
+end
+
+-- Finds closest enemy inside FOV who passes line of sight
 local function getBestTarget()
 	local screenCenter = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
 	local closestTargetPart = nil
@@ -888,13 +903,12 @@ local function getBestTarget()
 
 	for _, otherPlayer in ipairs(Players:GetPlayers()) do
 		if otherPlayer ~= player and otherPlayer.Character then
-			-- Team Check Verification
-			if not settings.TeamCheck or (otherPlayer.Team ~= player.Team or player.Team == nil) then
+			-- Fixed Team Check Verification
+			if isEnemy(otherPlayer) then
 				local oChar = otherPlayer.Character
 				local oHum = oChar:FindFirstChildOfClass("Humanoid")
 
 				if oHum and oHum.Health > 0 then
-					-- Resolve Target Part (Head or Universal Torso)
 					local targetPart = nil
 					if settings.TargetPart == "Head" then
 						targetPart = oChar:FindFirstChild("Head")
@@ -907,7 +921,7 @@ local function getBestTarget()
 						if onScreen and screenPos.Z > 0 then
 							local distFromCenter = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
 							if distFromCenter <= settings.FovRadius and distFromCenter < shortestScreenDist then
-								-- Persistent Wall Check Raycast
+								-- Line of Sight Wall Check
 								rayParams.FilterDescendantsInstances = { char, camera }
 								local hit = workspace:Raycast(camera.CFrame.Position, targetPart.Position - camera.CFrame.Position, rayParams)
 
@@ -933,7 +947,6 @@ RunService.RenderStepped:Connect(function()
 	local targetPart = getBestTarget()
 	if targetPart then
 		local targetCFrame = CFrame.lookAt(camera.CFrame.Position, targetPart.Position)
-		-- Smooth interpolation using the customized weight
 		camera.CFrame = camera.CFrame:Lerp(targetCFrame, settings.Smoothness)
 	end
 end)
