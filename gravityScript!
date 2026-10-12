@@ -1,0 +1,640 @@
+-- LocalScript inside StarterPlayerScripts
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+--------------------------------------------------------------------------------
+-- 1. SETTINGS & CUSTOM STAND POSE
+--------------------------------------------------------------------------------
+
+local COLOR_BG = Color3.fromRGB(15, 17, 22)
+local COLOR_DARK = Color3.fromRGB(25, 28, 36)
+local COLOR_LIGHT_DARK = Color3.fromRGB(36, 41, 52)
+local COLOR_ACTIVE = Color3.fromRGB(48, 54, 70)
+local COLOR_TEXT = Color3.fromRGB(240, 240, 240)
+local COLOR_MUTED = Color3.fromRGB(115, 120, 135)
+
+-- Your Custom Dialed-in R6 Stand Pose
+local CustomStandPose = {
+	RigType = "R6",
+	Joints = {
+		["Left Shoulder"]  = { Pos = Vector3.new(0.00, -0.50, 0.00), Rot = Vector3.new(-15, 29, -122) },
+		["Right Shoulder"] = { Pos = Vector3.new(-0.35, 0.06, -0.04), Rot = Vector3.new(33, 0, 0) },
+		["Neck"]           = { Pos = Vector3.new(0.00, -0.21, -0.00), Rot = Vector3.new(19, 0, 0) },
+		["Right Hip"]      = { Pos = Vector3.new(0.55, 0.37, 0.13), Rot = Vector3.new(-2, -22, -9) },
+		["Left Hip"]       = { Pos = Vector3.new(-0.36, 0.16, 0.16), Rot = Vector3.new(0, 4, 21) },
+		["RootJoint"]      = { Pos = Vector3.new(0.00, 0.00, 0.00), Rot = Vector3.new(-9, 0, 0) },
+	}
+}
+
+local MODES = {
+	{ Id = "Moon",      Name = "🌕 MOON" },
+	{ Id = "Balloon",   Name = "🎈 BALLOON" },
+	{ Id = "Slingshot", Name = "☄️ SLINGSHOT" },
+	{ Id = "Raincloud", Name = "🌧️ RAINCLOUD" },
+	{ Id = "YoYo",      Name = "🪀 YO-YO" },
+	{ Id = "Stand",     Name = "🦾 STAND" },
+}
+
+local currentModeIndex = 1
+local isZeroG = false
+local isLocked = false
+local lockTarget = nil
+
+local orbitAngle = 0
+local standHighlight = nil
+
+-- Flight Acceleration & Momentum Variables
+local MIN_FLIGHT_SPEED = 18
+local MAX_FLIGHT_SPEED = 82
+local ACCELERATION_RATE = 38     -- Studs/s added per second
+local DECELERATION_RATE = 45     -- Studs/s lost when coasting
+local currentSpeed = MIN_FLIGHT_SPEED
+local currentVelocity = Vector3.zero
+
+-- Knockback Settings
+local MIN_KNOCKBACK_SPEED = 28   -- Must be flying faster than this to trigger knockback
+local MAX_KNOCKBACK_FORCE = 75
+local lastImpactTime = 0
+
+--------------------------------------------------------------------------------
+-- 2. DYNAMIC RGB ACCENTS
+--------------------------------------------------------------------------------
+
+local currentRgb = Color3.fromRGB(0, 245, 215)
+local rgbItems = {}
+
+local function registerRgb(inst, prop)
+	table.insert(rgbItems, { Instance = inst, Property = prop })
+end
+
+local function unregisterRgb(inst)
+	for i = #rgbItems, 1, -1 do
+		if rgbItems[i].Instance == inst then
+			table.remove(rgbItems, i)
+		end
+	end
+end
+
+RunService.RenderStepped:Connect(function()
+	currentRgb = Color3.fromHSV((os.clock() * 0.35) % 1, 0.85, 1)
+	for i = #rgbItems, 1, -1 do
+		local item = rgbItems[i]
+		if item.Instance and item.Instance.Parent then
+			item.Instance[item.Property] = currentRgb
+		else
+			table.remove(rgbItems, i)
+		end
+	end
+	if standHighlight and standHighlight.Parent then
+		standHighlight.OutlineColor = currentRgb
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- 3. UNIFIED TABLET UI BAR
+--------------------------------------------------------------------------------
+
+local playerGui = player:WaitForChild("PlayerGui")
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "ZeroGOrbitGui"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.DisplayOrder = 999
+screenGui.Parent = playerGui
+
+local mainBar = Instance.new("Frame")
+mainBar.Name = "ControlBar"
+mainBar.Size = UDim2.fromOffset(260, 38)
+mainBar.Position = UDim2.new(0.8, -130, 0.65, 0)
+mainBar.BackgroundColor3 = COLOR_BG
+mainBar.BorderSizePixel = 0
+mainBar.Active = true
+mainBar.Parent = screenGui
+
+local barCorner = Instance.new("UICorner")
+barCorner.CornerRadius = UDim.new(0, 8)
+barCorner.Parent = mainBar
+
+local barStroke = Instance.new("UIStroke")
+barStroke.Thickness = 1.6
+barStroke.Color = COLOR_DARK
+barStroke.Parent = mainBar
+
+local zeroGBtn = Instance.new("TextButton")
+zeroGBtn.Name = "ZeroGBtn"
+zeroGBtn.Size = UDim2.new(0.3, 0, 1, -8)
+zeroGBtn.Position = UDim2.new(0, 4, 0, 4)
+zeroGBtn.BackgroundColor3 = COLOR_DARK
+zeroGBtn.BorderSizePixel = 0
+zeroGBtn.Font = Enum.Font.GothamBold
+zeroGBtn.Text = "ZERO-G: OFF"
+zeroGBtn.TextSize = 8
+zeroGBtn.TextColor3 = COLOR_MUTED
+zeroGBtn.AutoButtonColor = false
+zeroGBtn.Parent = mainBar
+local zCorner = Instance.new("UICorner")
+zCorner.CornerRadius = UDim.new(0, 6)
+zCorner.Parent = zeroGBtn
+local zStroke = Instance.new("UIStroke")
+zStroke.Thickness = 1
+zStroke.Color = COLOR_LIGHT_DARK
+zStroke.Parent = zeroGBtn
+
+local lockBtn = Instance.new("TextButton")
+lockBtn.Name = "LockBtn"
+lockBtn.Size = UDim2.new(0.3, 0, 1, -8)
+lockBtn.Position = UDim2.new(0.32, 0, 0, 4)
+lockBtn.BackgroundColor3 = COLOR_DARK
+lockBtn.BorderSizePixel = 0
+lockBtn.Font = Enum.Font.GothamBold
+lockBtn.Text = "FOLLOW: OFF"
+lockBtn.TextSize = 8
+lockBtn.TextColor3 = COLOR_MUTED
+lockBtn.AutoButtonColor = false
+lockBtn.Parent = mainBar
+local lCorner = Instance.new("UICorner")
+lCorner.CornerRadius = UDim.new(0, 6)
+lCorner.Parent = lockBtn
+local lStroke = Instance.new("UIStroke")
+lStroke.Thickness = 1
+lStroke.Color = COLOR_LIGHT_DARK
+lStroke.Parent = lockBtn
+
+local modeBtn = Instance.new("TextButton")
+modeBtn.Name = "ModeBtn"
+modeBtn.Size = UDim2.new(0.26, 0, 1, -8)
+modeBtn.Position = UDim2.new(0.64, 0, 0, 4)
+modeBtn.BackgroundColor3 = COLOR_DARK
+modeBtn.BorderSizePixel = 0
+modeBtn.Font = Enum.Font.GothamBold
+modeBtn.Text = MODES[currentModeIndex].Name
+modeBtn.TextSize = 8
+modeBtn.TextColor3 = COLOR_TEXT
+modeBtn.AutoButtonColor = false
+modeBtn.Parent = mainBar
+local mCorner = Instance.new("UICorner")
+mCorner.CornerRadius = UDim.new(0, 6)
+mCorner.Parent = modeBtn
+local mStroke = Instance.new("UIStroke")
+mStroke.Thickness = 1
+mStroke.Color = COLOR_LIGHT_DARK
+mStroke.Parent = modeBtn
+
+local dragHandle = Instance.new("Frame")
+dragHandle.Name = "DragHandle"
+dragHandle.Size = UDim2.new(0.1, -4, 1, 0)
+dragHandle.Position = UDim2.new(0.9, 2, 0, 0)
+dragHandle.BackgroundTransparency = 1
+dragHandle.Active = true
+dragHandle.Parent = mainBar
+
+local gripLabel = Instance.new("TextLabel")
+gripLabel.Size = UDim2.new(1, 0, 1, 0)
+gripLabel.BackgroundTransparency = 1
+gripLabel.Text = "⋮⋮"
+gripLabel.Font = Enum.Font.GothamBold
+gripLabel.TextSize = 14
+gripLabel.TextColor3 = COLOR_MUTED
+gripLabel.Parent = dragHandle
+
+--------------------------------------------------------------------------------
+-- 4. 2x3 EMOTE-STYLE MODE POPUP
+--------------------------------------------------------------------------------
+
+local modeMenu = Instance.new("Frame")
+modeMenu.Name = "ModeMenu"
+modeMenu.Size = UDim2.new(1, 0, 0, 84)
+modeMenu.Position = UDim2.new(0, 0, -1, -6)
+modeMenu.BackgroundColor3 = COLOR_BG
+modeMenu.BorderSizePixel = 0
+modeMenu.Visible = false
+modeMenu.ZIndex = 20
+modeMenu.Parent = mainBar
+
+local menuCorner = Instance.new("UICorner")
+menuCorner.CornerRadius = UDim.new(0, 8)
+menuCorner.Parent = modeMenu
+
+local menuStroke = Instance.new("UIStroke")
+menuStroke.Thickness = 1.4
+menuStroke.Color = COLOR_LIGHT_DARK
+menuStroke.Parent = modeMenu
+
+local menuGrid = Instance.new("UIGridLayout")
+menuGrid.CellSize = UDim2.new(0.5, -4, 0.333, -4)
+menuGrid.CellPadding = UDim2.new(0, 4, 0, 3)
+menuGrid.HorizontalAlignment = Enum.HorizontalAlignment.Center
+menuGrid.VerticalAlignment = Enum.VerticalAlignment.Center
+menuGrid.Parent = modeMenu
+
+local modeButtons = {}
+
+local function refreshMenuUI()
+	for idx, btn in ipairs(modeButtons) do
+		if idx == currentModeIndex then
+			btn.BackgroundColor3 = COLOR_ACTIVE
+			btn.TextColor3 = COLOR_TEXT
+			btn.UIStroke.Color = currentRgb
+		else
+			btn.BackgroundColor3 = COLOR_DARK
+			btn.TextColor3 = COLOR_MUTED
+			btn.UIStroke.Color = COLOR_LIGHT_DARK
+		end
+	end
+	modeBtn.Text = MODES[currentModeIndex].Name
+end
+
+for idx, modeData in ipairs(MODES) do
+	local itemBtn = Instance.new("TextButton")
+	itemBtn.Name = "Mode_" .. modeData.Id
+	itemBtn.BackgroundColor3 = COLOR_DARK
+	itemBtn.BorderSizePixel = 0
+	itemBtn.Font = Enum.Font.GothamBold
+	itemBtn.Text = modeData.Name
+	itemBtn.TextSize = 8
+	itemBtn.TextColor3 = COLOR_MUTED
+	itemBtn.AutoButtonColor = false
+	itemBtn.ZIndex = 21
+	itemBtn.Parent = modeMenu
+
+	local itemCorner = Instance.new("UICorner")
+	itemCorner.CornerRadius = UDim.new(0, 4)
+	itemCorner.Parent = itemBtn
+
+	local itemStroke = Instance.new("UIStroke")
+	itemStroke.Thickness = 1
+	itemStroke.Color = COLOR_LIGHT_DARK
+	itemStroke.Parent = itemBtn
+
+	itemBtn.Activated:Connect(function()
+		currentModeIndex = idx
+		orbitAngle = 0
+		refreshMenuUI()
+		modeMenu.Visible = false
+	end)
+
+	table.insert(modeButtons, itemBtn)
+end
+
+modeBtn.Activated:Connect(function()
+	modeMenu.Visible = not modeMenu.Visible
+	if modeMenu.Visible then refreshMenuUI() end
+end)
+
+--------------------------------------------------------------------------------
+-- 5. DRAG LOGIC
+--------------------------------------------------------------------------------
+
+local dragging = false
+local dragStart = Vector2.zero
+local startPos = UDim2.new()
+
+dragHandle.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = true
+		dragStart = input.Position
+		startPos = mainBar.Position
+
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end)
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+		local delta = input.Position - dragStart
+		mainBar.Position = UDim2.new(
+			startPos.X.Scale,
+			startPos.X.Offset + delta.X,
+			startPos.Y.Scale,
+			startPos.Y.Offset + delta.Y
+		)
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- 6. STATE CONTROLLERS
+--------------------------------------------------------------------------------
+
+local function getCenterScreenTarget()
+	local screenCenter = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+	local closestTarget = nil
+	local closestDist = math.huge
+
+	for _, otherPlayer in ipairs(Players:GetPlayers()) do
+		if otherPlayer ~= player and otherPlayer.Character then
+			local oRoot = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
+			local oHum = otherPlayer.Character:FindFirstChildOfClass("Humanoid")
+
+			if oRoot and oHum and oHum.Health > 0 then
+				local screenPos, onScreen = camera:WorldToViewportPoint(oRoot.Position)
+				if onScreen and screenPos.Z > 0 then
+					local dist = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+					if dist < closestDist then
+						closestDist = dist
+						closestTarget = oRoot
+					end
+				end
+			end
+		end
+	end
+	return closestTarget
+end
+
+local function cleanStandAura()
+	if standHighlight then
+		standHighlight:Destroy()
+		standHighlight = nil
+	end
+end
+
+local function updateUIStates()
+	if isZeroG then
+		zeroGBtn.Text = "ZERO-G: ON"
+		zeroGBtn.TextColor3 = COLOR_TEXT
+		registerRgb(zStroke, "Color")
+	else
+		zeroGBtn.Text = "ZERO-G: OFF"
+		zeroGBtn.TextColor3 = COLOR_MUTED
+		unregisterRgb(zStroke)
+		zStroke.Color = COLOR_LIGHT_DARK
+	end
+
+	if isLocked then
+		lockBtn.Text = "FOLLOW: ON"
+		lockBtn.TextColor3 = COLOR_TEXT
+		registerRgb(lStroke, "Color")
+	else
+		lockBtn.Text = "FOLLOW: OFF"
+		lockBtn.TextColor3 = COLOR_MUTED
+		unregisterRgb(lStroke)
+		lStroke.Color = COLOR_LIGHT_DARK
+	end
+end
+
+local function setLockedState(active)
+	if active then
+		if not isZeroG then return end
+		local target = getCenterScreenTarget()
+		if target then
+			lockTarget = target
+			isLocked = true
+			orbitAngle = 0
+		else
+			isLocked = false
+			lockTarget = nil
+		end
+	else
+		isLocked = false
+		lockTarget = nil
+		cleanStandAura()
+	end
+	updateUIStates()
+end
+
+local function setZeroGState(active)
+	isZeroG = active
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+
+	if isZeroG then
+		if hum then hum.PlatformStand = true end
+		currentSpeed = MIN_FLIGHT_SPEED
+		currentVelocity = Vector3.zero
+	else
+		setLockedState(false)
+		if hum and root then
+			hum.PlatformStand = false
+			local look = root.CFrame.LookVector
+			root.CFrame = CFrame.lookAt(root.Position, root.Position + Vector3.new(look.X, 0, look.Z))
+			root.AssemblyLinearVelocity = Vector3.zero
+			root.AssemblyAngularVelocity = Vector3.zero
+		end
+	end
+	updateUIStates()
+end
+
+zeroGBtn.Activated:Connect(function()
+	setZeroGState(not isZeroG)
+end)
+
+lockBtn.Activated:Connect(function()
+	if not isZeroG then return end
+	setLockedState(not isLocked)
+end)
+
+--------------------------------------------------------------------------------
+-- 7. R6 STAND POSE APPLICATION (STEPPED)
+--------------------------------------------------------------------------------
+
+RunService.Stepped:Connect(function()
+	local isStandMode = (isZeroG and isLocked and MODES[currentModeIndex].Id == "Stand")
+	local char = player.Character
+	if not char then return end
+
+	-- Manage Stand Highlight Aura
+	if isStandMode then
+		if not standHighlight then
+			standHighlight = Instance.new("Highlight")
+			standHighlight.Name = "StandAura"
+			standHighlight.FillColor = Color3.fromRGB(150, 60, 255)
+			standHighlight.FillTransparency = 0.55
+			standHighlight.OutlineColor = currentRgb
+			standHighlight.OutlineTransparency = 0
+			standHighlight.Parent = char
+		end
+	else
+		cleanStandAura()
+	end
+
+	-- Apply your custom R6 joint transforms
+	if isStandMode then
+		local t = os.clock()
+		local breathe = math.sin(t * 2) * 0.04
+
+		local torso = char:FindFirstChild("Torso")
+		local rootPart = char:FindFirstChild("HumanoidRootPart")
+
+		for jointName, data in pairs(CustomStandPose.Joints) do
+			local joint = (torso and torso:FindFirstChild(jointName)) or (rootPart and rootPart:FindFirstChild(jointName))
+
+			if joint and joint:IsA("Motor6D") then
+				local radX = math.rad(data.Rot.X)
+				local radY = math.rad(data.Rot.Y)
+				local radZ = math.rad(data.Rot.Z)
+
+				-- Slight breathing float offset
+				local posOffset = data.Pos + Vector3.new(0, breathe, 0)
+				joint.Transform = CFrame.new(posOffset) * CFrame.fromEulerAnglesXYZ(radX, radY, radZ)
+			end
+		end
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- 8. FLIGHT ENGINE & MOMENTUM KNOCKBACK
+--------------------------------------------------------------------------------
+
+-- Checks for high-speed collisions and applies momentum knockback
+local function checkImpactKnockback(myRoot, speed)
+	if speed < MIN_KNOCKBACK_SPEED or (os.clock() - lastImpactTime < 0.35) then return end
+
+	for _, otherPlayer in ipairs(Players:GetPlayers()) do
+		if otherPlayer ~= player and otherPlayer.Character then
+			local oRoot = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
+			local oHum = otherPlayer.Character:FindFirstChildOfClass("Humanoid")
+
+			if oRoot and oHum and oHum.Health > 0 then
+				local dist = (oRoot.Position - myRoot.Position).Magnitude
+				if dist <= 4.2 then
+					lastImpactTime = os.clock()
+
+					-- Calculate force ratio based on speed
+					local speedRatio = math.clamp((speed - MIN_KNOCKBACK_SPEED) / (MAX_FLIGHT_SPEED - MIN_KNOCKBACK_SPEED), 0.15, 1.0)
+					local knockbackForce = speedRatio * MAX_KNOCKBACK_FORCE
+
+					-- Direct impulse away from impact + slight vertical lift
+					local impactDir = (oRoot.Position - myRoot.Position).Unit
+					local pushVelocity = (impactDir + Vector3.new(0, 0.3, 0)).Unit * knockbackForce
+
+					oRoot.AssemblyLinearVelocity = pushVelocity
+
+					-- Self-recoil (momentum bounce)
+					myRoot.AssemblyLinearVelocity = -impactDir * (speed * 0.3)
+					currentVelocity = -impactDir * (speed * 0.25)
+					break
+				end
+			end
+		end
+	end
+end
+
+RunService.Heartbeat:Connect(function(dt)
+	if not isZeroG then return end
+
+	local char = player.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not root or not hum or hum.Health <= 0 then return end
+
+	if not hum.PlatformStand then
+		hum.PlatformStand = true
+	end
+
+	-- FOLLOW MODES
+	if isLocked and lockTarget and lockTarget.Parent then
+		local targetHum = lockTarget.Parent:FindFirstChildOfClass("Humanoid")
+		if not targetHum or targetHum.Health <= 0 then
+			setLockedState(false)
+			return
+		end
+
+		local t = os.clock()
+		local activeMode = MODES[currentModeIndex].Id
+		local targetPos = lockTarget.Position
+		local targetCFrame = lockTarget.CFrame
+		local targetVel = lockTarget.AssemblyLinearVelocity
+
+		if activeMode == "Moon" then
+			orbitAngle = orbitAngle + (0.8 * dt)
+			local desired = targetPos + Vector3.new(math.cos(orbitAngle) * 18, math.sin(orbitAngle * 1.5) * 2.5, math.sin(orbitAngle) * 18)
+			root.AssemblyLinearVelocity = (desired - root.Position) * 7
+			root.AssemblyAngularVelocity = Vector3.new(math.sin(t * 1.5) * 3, math.cos(t * 2) * 3, math.sin(t * 2.5) * 3)
+
+		elseif activeMode == "Balloon" then
+			local bob = math.sin(t * 2.2) * 1.4
+			local dragOffset = -targetVel * 0.28
+			local desired = targetPos + Vector3.new(dragOffset.X, 11 + bob, dragOffset.Z)
+			root.AssemblyLinearVelocity = (desired - root.Position) * 8
+			root.AssemblyAngularVelocity = Vector3.new(dragOffset.Z * 0.5, math.sin(t) * 1.5, -dragOffset.X * 0.5)
+
+		elseif activeMode == "Slingshot" then
+			orbitAngle = orbitAngle + (1.6 * dt)
+			local offset = Vector3.new(math.sin(orbitAngle) * 32, math.sin(orbitAngle * 2) * 3, math.cos(orbitAngle) * 10)
+			local desired = targetCFrame:PointToWorldSpace(offset)
+			root.AssemblyLinearVelocity = (desired - root.Position) * 10
+			root.AssemblyAngularVelocity = Vector3.new(3, 5, 2)
+
+		elseif activeMode == "Raincloud" then
+			local bob = math.sin(t * 3) * 0.4
+			local desired = targetPos + Vector3.new(0, 8.5 + bob, 0)
+			root.AssemblyLinearVelocity = (desired - root.Position) * 14 + targetVel
+			root.AssemblyAngularVelocity = Vector3.new(0, math.sin(t * 2) * 2, 0)
+
+		elseif activeMode == "YoYo" then
+			local dist = math.abs(math.sin(t * 1.6)) * 24 + 4
+			local dir = Vector3.new(math.cos(t * 0.5), 0.25, math.sin(t * 0.5)).Unit
+			local desired = targetPos + (dir * dist)
+			root.AssemblyLinearVelocity = (desired - root.Position) * 9
+			root.AssemblyAngularVelocity = Vector3.new(4, 2, 4)
+
+		elseif activeMode == "Stand" then
+			local floatBob = math.sin(t * 2.5) * 0.35
+			local standCFrame = targetCFrame * CFrame.new(2.5, 2.2 + floatBob, 3.5)
+			root.AssemblyLinearVelocity = (standCFrame.Position - root.Position) * 15 + targetVel
+			root.CFrame = root.CFrame:Lerp(CFrame.lookAt(root.Position, root.Position + targetCFrame.LookVector), 0.25)
+			root.AssemblyAngularVelocity = Vector3.zero
+		end
+
+	else
+		-- PROGRESSIVE THRUSTER ACCELERATION & FLUID FLIGHT
+		local moveDir = hum.MoveDirection
+
+		if moveDir.Magnitude > 0 then
+			-- Holding joystick builds speed over time
+			currentSpeed = math.min(MAX_FLIGHT_SPEED, currentSpeed + (ACCELERATION_RATE * dt))
+
+			-- Resolve 3D camera vector
+			local camXZLook = (camera.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
+			local camXZRight = (camera.CFrame.RightVector * Vector3.new(1, 0, 1)).Unit
+
+			local forwardDot = moveDir:Dot(camXZLook)
+			local rightDot = moveDir:Dot(camXZRight)
+
+			local targetDir = (camera.CFrame.LookVector * forwardDot) + (camera.CFrame.RightVector * rightDot)
+			if targetDir.Magnitude > 0 then
+				targetDir = targetDir.Unit
+			end
+
+			-- Smooth steering trajectory
+			currentVelocity = currentVelocity:Lerp(targetDir * currentSpeed, 8 * dt)
+			root.AssemblyLinearVelocity = currentVelocity
+
+			-- Banking tilt
+			root.AssemblyAngularVelocity = Vector3.new(moveDir.Z * 2, 0, -moveDir.X * 2)
+
+			-- Check for momentum-scaled impacts
+			checkImpactKnockback(root, currentVelocity.Magnitude)
+		else
+			-- Coasting & Deceleration
+			currentSpeed = math.max(MIN_FLIGHT_SPEED, currentSpeed - (DECELERATION_RATE * dt))
+			currentVelocity = currentVelocity * math.clamp(1 - (2.5 * dt), 0, 1)
+
+			if currentVelocity.Magnitude > 3 then
+				root.AssemblyLinearVelocity = currentVelocity
+			else
+				-- Idle zero-gravity space drift
+				local driftX = math.noise(os.clock() * 0.3, 0) * 3.5
+				local driftY = math.sin(os.clock() * 0.8) * 2.5
+				local driftZ = math.noise(0, os.clock() * 0.3) * 3.5
+				root.AssemblyLinearVelocity = Vector3.new(driftX, driftY, driftZ)
+			end
+
+			root.AssemblyAngularVelocity = Vector3.new(
+				math.sin(os.clock() * 0.5) * 1.8,
+				math.cos(os.clock() * 0.4) * 1.8,
+				math.sin(os.clock() * 0.3) * 1.8
+			)
+		end
+	end
+end)
