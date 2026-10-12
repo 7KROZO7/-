@@ -1,0 +1,737 @@
+-- LocalScript inside StarterPlayerScripts
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+--------------------------------------------------------------------------------
+-- 1. PALETTE & THEME
+--------------------------------------------------------------------------------
+
+local COLOR_BG = Color3.fromRGB(15, 17, 22)
+local COLOR_HEADER = Color3.fromRGB(22, 25, 32)
+local COLOR_DARK = Color3.fromRGB(26, 29, 38)
+local COLOR_LIGHT_DARK = Color3.fromRGB(36, 41, 54)
+local COLOR_ACCENT = Color3.fromRGB(0, 245, 215)
+local COLOR_TEXT = Color3.fromRGB(240, 240, 240)
+local COLOR_MUTED = Color3.fromRGB(115, 120, 135)
+
+--------------------------------------------------------------------------------
+-- 2. RIG DEFINITIONS & POSE DATA
+--------------------------------------------------------------------------------
+
+local R6_JOINTS = {
+	{ Name = "Head",       JointName = "Neck",           ParentPart = "Torso" },
+	{ Name = "Torso",      JointName = "RootJoint",      ParentPart = "HumanoidRootPart" },
+	{ Name = "Right Arm",  JointName = "Right Shoulder", ParentPart = "Torso" },
+	{ Name = "Left Arm",   JointName = "Left Shoulder",  ParentPart = "Torso" },
+	{ Name = "Right Leg",  JointName = "Right Hip",      ParentPart = "Torso" },
+	{ Name = "Left Leg",   JointName = "Left Hip",       ParentPart = "Torso" },
+}
+
+local R15_JOINTS = {
+	{ Name = "Head",            JointName = "Neck",          ParentPart = "UpperTorso" },
+	{ Name = "UpperTorso",      JointName = "Waist",         ParentPart = "LowerTorso" },
+	{ Name = "LowerTorso",      JointName = "Root",          ParentPart = "HumanoidRootPart" },
+	{ Name = "Right UpperArm",  JointName = "RightShoulder", ParentPart = "UpperTorso" },
+	{ Name = "Right LowerArm",  JointName = "RightElbow",    ParentPart = "RightUpperArm" },
+	{ Name = "Right Hand",      JointName = "RightWrist",    ParentPart = "RightLowerArm" },
+	{ Name = "Left UpperArm",   JointName = "LeftShoulder",  ParentPart = "UpperTorso" },
+	{ Name = "Left LowerArm",   JointName = "LeftElbow",     ParentPart = "LeftUpperArm" },
+	{ Name = "Left Hand",       JointName = "LeftWrist",     ParentPart = "LeftLowerArm" },
+	{ Name = "Right UpperLeg",  JointName = "RightHip",      ParentPart = "LowerTorso" },
+	{ Name = "Right LowerLeg",  JointName = "RightKnee",     ParentPart = "RightUpperLeg" },
+	{ Name = "Right Foot",      JointName = "RightAnkle",    ParentPart = "RightLowerLeg" },
+	{ Name = "Left UpperLeg",   JointName = "LeftHip",       ParentPart = "LowerTorso" },
+	{ Name = "Left LowerLeg",   JointName = "LeftKnee",      ParentPart = "LeftUpperLeg" },
+	{ Name = "Left Foot",       JointName = "LeftAnkle",     ParentPart = "LeftLowerLeg" },
+}
+
+local currentRigType = "R15"
+local activeJointList = R15_JOINTS
+local selectedLimbIndex = 1
+local poseData = {} -- [JointName] = { Pos = Vector3, Rot = Vector3 }
+
+local function initPoseData()
+	poseData = {}
+	for _, def in ipairs(activeJointList) do
+		poseData[def.JointName] = {
+			Pos = Vector3.zero,
+			Rot = Vector3.zero,
+		}
+	end
+end
+initPoseData()
+
+--------------------------------------------------------------------------------
+-- 3. SELECTION HIGHLIGHT
+--------------------------------------------------------------------------------
+
+local limbHighlight = Instance.new("Highlight")
+limbHighlight.Name = "LimbEditorHighlight"
+limbHighlight.FillColor = COLOR_ACCENT
+limbHighlight.FillTransparency = 0.6
+limbHighlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+limbHighlight.OutlineTransparency = 0.2
+limbHighlight.Enabled = false
+
+local function updateLimbHighlight()
+	local char = player.Character
+	if not char then
+		limbHighlight.Enabled = false
+		return
+	end
+
+	local def = activeJointList[selectedLimbIndex]
+	if not def then
+		limbHighlight.Enabled = false
+		return
+	end
+
+	-- Locate the body part being posed
+	local targetPart = char:FindFirstChild(def.Name) or char:FindFirstChild(def.JointName)
+	if not targetPart then
+		-- Search by Joint's Part1
+		local parentPart = char:FindFirstChild(def.ParentPart)
+		if parentPart then
+			local joint = parentPart:FindFirstChild(def.JointName)
+			if joint and joint:IsA("Motor6D") and joint.Part1 then
+				targetPart = joint.Part1
+			end
+		end
+	end
+
+	if targetPart then
+		limbHighlight.Adornee = targetPart
+		limbHighlight.Parent = targetPart
+		limbHighlight.Enabled = true
+	else
+		limbHighlight.Enabled = false
+	end
+end
+
+--------------------------------------------------------------------------------
+-- 4. SCREEN GUI & MAIN WINDOW
+--------------------------------------------------------------------------------
+
+local playerGui = player:WaitForChild("PlayerGui")
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AvatarPoseEditorGui"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.DisplayOrder = 1000
+screenGui.Parent = playerGui
+
+local mainWindow = Instance.new("Frame")
+mainWindow.Name = "PoseEditorWindow"
+mainWindow.Size = UDim2.fromOffset(360, 290)
+mainWindow.Position = UDim2.new(0.5, -180, 0.55, -145)
+mainWindow.BackgroundColor3 = COLOR_BG
+mainWindow.BorderSizePixel = 0
+mainWindow.Active = true
+mainWindow.Parent = screenGui
+
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 8)
+mainCorner.Parent = mainWindow
+
+local mainStroke = Instance.new("UIStroke")
+mainStroke.Thickness = 1.6
+mainStroke.Color = COLOR_ACCENT
+mainStroke.Parent = mainWindow
+
+-- Header
+local header = Instance.new("Frame")
+header.Name = "Header"
+header.Size = UDim2.new(1, 0, 0, 30)
+header.BackgroundColor3 = COLOR_HEADER
+header.BorderSizePixel = 0
+header.Parent = mainWindow
+
+local hCorner = Instance.new("UICorner")
+hCorner.CornerRadius = UDim.new(0, 8)
+hCorner.Parent = header
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(0.5, 0, 1, 0)
+title.Position = UDim2.new(0, 10, 0, 0)
+title.BackgroundTransparency = 1
+title.Font = Enum.Font.GothamBold
+title.Text = "🦴 POSE EDITOR (6-DOF)"
+title.TextSize = 11
+title.TextColor3 = COLOR_TEXT
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = header
+
+local rigToggleBtn = Instance.new("TextButton")
+rigToggleBtn.Size = UDim2.fromOffset(72, 20)
+rigToggleBtn.Position = UDim2.new(1, -82, 0.5, -10)
+rigToggleBtn.BackgroundColor3 = COLOR_DARK
+rigToggleBtn.BorderSizePixel = 0
+rigToggleBtn.Font = Enum.Font.GothamBold
+rigToggleBtn.Text = "RIG: " .. currentRigType
+rigToggleBtn.TextSize = 10
+rigToggleBtn.TextColor3 = COLOR_ACCENT
+rigToggleBtn.Parent = header
+
+local rtCorner = Instance.new("UICorner")
+rtCorner.CornerRadius = UDim.new(0, 4)
+rtCorner.Parent = rigToggleBtn
+
+--------------------------------------------------------------------------------
+-- 5. DRAG LOGIC
+--------------------------------------------------------------------------------
+
+local dragging = false
+local dragStart = Vector2.zero
+local startPos = UDim2.new()
+
+header.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = true
+		dragStart = input.Position
+		startPos = mainWindow.Position
+
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end)
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+		local delta = input.Position - dragStart
+		mainWindow.Position = UDim2.new(
+			startPos.X.Scale,
+			startPos.X.Offset + delta.X,
+			startPos.Y.Scale,
+			startPos.Y.Offset + delta.Y
+		)
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- 6. LEFT PANEL: LIMB LIST
+--------------------------------------------------------------------------------
+
+local limbScroll = Instance.new("ScrollingFrame")
+limbScroll.Name = "LimbList"
+limbScroll.Size = UDim2.new(0, 105, 1, -72)
+limbScroll.Position = UDim2.new(0, 6, 0, 36)
+limbScroll.BackgroundColor3 = COLOR_DARK
+limbScroll.BorderSizePixel = 0
+limbScroll.ScrollBarThickness = 3
+limbScroll.Parent = mainWindow
+
+local lsCorner = Instance.new("UICorner")
+lsCorner.CornerRadius = UDim.new(0, 6)
+lsCorner.Parent = limbScroll
+
+local lsLayout = Instance.new("UIListLayout")
+lsLayout.Padding = UDim.new(0, 3)
+lsLayout.Parent = limbScroll
+
+local limbButtons = {}
+local refreshSliders -- Forward declaration
+
+local function buildLimbButtons()
+	for _, b in ipairs(limbButtons) do b:Destroy() end
+	limbButtons = {}
+
+	for idx, def in ipairs(activeJointList) do
+		local btn = Instance.new("TextButton")
+		btn.Name = def.JointName
+		btn.Size = UDim2.new(1, -6, 0, 22)
+		btn.BackgroundColor3 = (idx == selectedLimbIndex) and COLOR_LIGHT_DARK or COLOR_BG
+		btn.BorderSizePixel = 0
+		btn.Font = Enum.Font.GothamBold
+		btn.Text = def.Name
+		btn.TextSize = 8
+		btn.TextColor3 = (idx == selectedLimbIndex) and COLOR_ACCENT or COLOR_MUTED
+		btn.Parent = limbScroll
+
+		local bc = Instance.new("UICorner")
+		bc.CornerRadius = UDim.new(0, 4)
+		bc.Parent = btn
+
+		btn.Activated:Connect(function()
+			selectedLimbIndex = idx
+			for i, other in ipairs(limbButtons) do
+				other.BackgroundColor3 = (i == idx) and COLOR_LIGHT_DARK or COLOR_BG
+				other.TextColor3 = (i == idx) and COLOR_ACCENT or COLOR_MUTED
+			end
+			updateLimbHighlight()
+			if refreshSliders then refreshSliders() end
+		end)
+
+		table.insert(limbButtons, btn)
+	end
+
+	limbScroll.CanvasSize = UDim2.new(0, 0, 0, #activeJointList * 25 + 6)
+	updateLimbHighlight()
+end
+
+--------------------------------------------------------------------------------
+-- 7. RIGHT PANEL: 6-DOF SLIDERS
+--------------------------------------------------------------------------------
+
+local slidersContainer = Instance.new("ScrollingFrame")
+slidersContainer.Name = "SlidersContainer"
+slidersContainer.Size = UDim2.new(1, -123, 1, -72)
+slidersContainer.Position = UDim2.new(0, 117, 0, 36)
+slidersContainer.BackgroundColor3 = COLOR_DARK
+slidersContainer.BorderSizePixel = 0
+slidersContainer.ScrollBarThickness = 3
+slidersContainer.Parent = mainWindow
+
+local scCorner = Instance.new("UICorner")
+scCorner.CornerRadius = UDim.new(0, 6)
+scCorner.Parent = slidersContainer
+
+local scLayout = Instance.new("UIListLayout")
+scLayout.Padding = UDim.new(0, 4)
+scLayout.Parent = slidersContainer
+
+local sliderControllers = {}
+
+local function createSlider(title, minVal, maxVal, isDegree, getter, setter)
+	local row = Instance.new("Frame")
+	row.Size = UDim2.new(1, -6, 0, 26)
+	row.BackgroundTransparency = 1
+	row.Parent = slidersContainer
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(0.48, 0, 1, 0)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBold
+	label.TextSize = 8
+	label.TextColor3 = COLOR_TEXT
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Parent = row
+
+	local zeroBtn = Instance.new("TextButton")
+	zeroBtn.Size = UDim2.fromOffset(16, 16)
+	zeroBtn.Position = UDim2.new(0.48, 2, 0.5, -8)
+	zeroBtn.BackgroundColor3 = COLOR_LIGHT_DARK
+	zeroBtn.BorderSizePixel = 0
+	zeroBtn.Font = Enum.Font.GothamBold
+	zeroBtn.Text = "0"
+	zeroBtn.TextSize = 8
+	zeroBtn.TextColor3 = COLOR_MUTED
+	zeroBtn.Parent = row
+	local zc = Instance.new("UICorner")
+	zc.CornerRadius = UDim.new(0, 3)
+	zc.Parent = zeroBtn
+
+	local track = Instance.new("Frame")
+	track.Size = UDim2.new(0.42, 0, 0, 12)
+	track.Position = UDim2.new(1, -95, 0.5, -6)
+	track.BackgroundColor3 = COLOR_BG
+	track.BorderSizePixel = 0
+	track.Active = true
+	track.Parent = row
+	local tc = Instance.new("UICorner")
+	tc.CornerRadius = UDim.new(0, 4)
+	tc.Parent = track
+
+	local fill = Instance.new("Frame")
+	fill.Size = UDim2.new(0.5, 0, 1, 0)
+	fill.BackgroundColor3 = isDegree and COLOR_ACCENT or Color3.fromRGB(80, 170, 255)
+	fill.BorderSizePixel = 0
+	fill.Parent = track
+	local fc = Instance.new("UICorner")
+	fc.CornerRadius = UDim.new(0, 4)
+	fc.Parent = fill
+
+	local function updateDisplay(val)
+		local ratio = math.clamp((val - minVal) / (maxVal - minVal), 0, 1)
+		fill.Size = UDim2.new(ratio, 0, 1, 0)
+		if isDegree then
+			label.Text = string.format("%s: %d°", title, math.floor(val))
+		else
+			label.Text = string.format("%s: %.2f", title, val)
+		end
+	end
+
+	local function setValFromX(xPos)
+		local ratio = math.clamp((xPos - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+		local val = minVal + (maxVal - minVal) * ratio
+		setter(val)
+		updateDisplay(val)
+	end
+
+	local sliding = false
+	track.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+			sliding = true
+			setValFromX(input.Position.X)
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					sliding = false
+				end
+			end)
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if sliding and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+			setValFromX(input.Position.X)
+		end
+	end)
+
+	zeroBtn.Activated:Connect(function()
+		setter(0)
+		updateDisplay(0)
+	end)
+
+	return {
+		Refresh = function()
+			updateDisplay(getter())
+		end
+	}
+end
+
+local function getActivePoseEntry()
+	local def = activeJointList[selectedLimbIndex]
+	if not def then return nil end
+	if not poseData[def.JointName] then
+		poseData[def.JointName] = { Pos = Vector3.zero, Rot = Vector3.zero }
+	end
+	return poseData[def.JointName]
+end
+
+-- Section Label: Position
+local function createSectionHeader(txt, color)
+	local h = Instance.new("TextLabel")
+	h.Size = UDim2.new(1, -6, 0, 16)
+	h.BackgroundTransparency = 1
+	h.Font = Enum.Font.GothamBold
+	h.Text = txt
+	h.TextSize = 8
+	h.TextColor3 = color
+	h.TextXAlignment = Enum.TextXAlignment.Left
+	h.Parent = slidersContainer
+end
+
+createSectionHeader("📍 POSITION (STUDS)", Color3.fromRGB(80, 170, 255))
+
+table.insert(sliderControllers, createSlider("POS X", -3, 3, false,
+	function() local p = getActivePoseEntry(); return p and p.Pos.X or 0 end,
+	function(v) local p = getActivePoseEntry(); if p then p.Pos = Vector3.new(v, p.Pos.Y, p.Pos.Z) end end
+))
+
+table.insert(sliderControllers, createSlider("POS Y", -3, 3, false,
+	function() local p = getActivePoseEntry(); return p and p.Pos.Y or 0 end,
+	function(v) local p = getActivePoseEntry(); if p then p.Pos = Vector3.new(p.Pos.X, v, p.Pos.Z) end end
+))
+
+table.insert(sliderControllers, createSlider("POS Z", -3, 3, false,
+	function() local p = getActivePoseEntry(); return p and p.Pos.Z or 0 end,
+	function(v) local p = getActivePoseEntry(); if p then p.Pos = Vector3.new(p.Pos.X, p.Pos.Y, v) end end
+))
+
+createSectionHeader("🔄 ROTATION (DEGREES)", COLOR_ACCENT)
+
+table.insert(sliderControllers, createSlider("ROT X", -180, 180, true,
+	function() local p = getActivePoseEntry(); return p and p.Rot.X or 0 end,
+	function(v) local p = getActivePoseEntry(); if p then p.Rot = Vector3.new(v, p.Rot.Y, p.Rot.Z) end end
+))
+
+table.insert(sliderControllers, createSlider("ROT Y", -180, 180, true,
+	function() local p = getActivePoseEntry(); return p and p.Rot.Y or 0 end,
+	function(v) local p = getActivePoseEntry(); if p then p.Rot = Vector3.new(p.Rot.X, v, p.Rot.Z) end end
+))
+
+table.insert(sliderControllers, createSlider("ROT Z", -180, 180, true,
+	function() local p = getActivePoseEntry(); return p and p.Rot.Z or 0 end,
+	function(v) local p = getActivePoseEntry(); if p then p.Rot = Vector3.new(p.Rot.X, p.Rot.Y, v) end end
+))
+
+slidersContainer.CanvasSize = UDim2.new(0, 0, 0, 210)
+
+refreshSliders = function()
+	for _, c in ipairs(sliderControllers) do
+		c.Refresh()
+	end
+end
+
+--------------------------------------------------------------------------------
+-- 8. RIG TOGGLE LOGIC
+--------------------------------------------------------------------------------
+
+rigToggleBtn.Activated:Connect(function()
+	if currentRigType == "R15" then
+		currentRigType = "R6"
+		activeJointList = R6_JOINTS
+	else
+		currentRigType = "R15"
+		activeJointList = R15_JOINTS
+	end
+	selectedLimbIndex = 1
+	rigToggleBtn.Text = "RIG: " .. currentRigType
+	initPoseData()
+	buildLimbButtons()
+	refreshSliders()
+end)
+
+--------------------------------------------------------------------------------
+-- 9. BOTTOM ACTION TOOLBAR
+--------------------------------------------------------------------------------
+
+local function createBottomBtn(text, posX, width, color, callback)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(width, 0, 0, 24)
+	btn.Position = UDim2.new(posX, 0, 1, -30)
+	btn.BackgroundColor3 = color or COLOR_LIGHT_DARK
+	btn.BorderSizePixel = 0
+	btn.Font = Enum.Font.GothamBold
+	btn.Text = text
+	btn.TextSize = 9
+	btn.TextColor3 = COLOR_TEXT
+	btn.Parent = mainWindow
+
+	local bc = Instance.new("UICorner")
+	bc.CornerRadius = UDim.new(0, 5)
+	bc.Parent = btn
+
+	btn.Activated:Connect(callback)
+	return btn
+end
+
+-- 🪞 MIRROR TOOL
+createBottomBtn("🪞 MIRROR", 0.02, 0.3, COLOR_LIGHT_DARK, function()
+	local def = activeJointList[selectedLimbIndex]
+	if not def then return end
+
+	local sourceName = def.JointName
+	local targetName = nil
+
+	-- Pair R15/R6 corresponding limbs
+	local pairsMap = {
+		["Right Shoulder"] = "Left Shoulder",   ["Left Shoulder"] = "Right Shoulder",
+		["Right Hip"]      = "Left Hip",        ["Left Hip"]      = "Right Hip",
+		["RightShoulder"]  = "LeftShoulder",    ["LeftShoulder"]  = "RightShoulder",
+		["RightElbow"]     = "LeftElbow",       ["LeftElbow"]     = "RightElbow",
+		["RightWrist"]     = "LeftWrist",       ["LeftWrist"]     = "RightWrist",
+		["RightKnee"]      = "LeftKnee",        ["LeftKnee"]      = "RightKnee",
+		["RightAnkle"]     = "LeftAnkle",       ["LeftAnkle"]     = "RightAnkle",
+	}
+
+	targetName = pairsMap[sourceName]
+	if targetName and poseData[sourceName] and poseData[targetName] then
+		local s = poseData[sourceName]
+		-- Invert X position and Y/Z rotation for natural anatomical symmetry
+		poseData[targetName].Pos = Vector3.new(-s.Pos.X, s.Pos.Y, s.Pos.Z)
+		poseData[targetName].Rot = Vector3.new(s.Rot.X, -s.Rot.Y, -s.Rot.Z)
+		refreshSliders()
+	end
+end)
+
+-- 🔄 RESET ALL TOOL
+createBottomBtn("🔄 RESET", 0.35, 0.3, COLOR_DARK, function()
+	initPoseData()
+	refreshSliders()
+end)
+
+--------------------------------------------------------------------------------
+-- 10. EXPORT POPUP & ONE-TAP CLIPBOARD SYSTEM
+--------------------------------------------------------------------------------
+
+local exportWindow = Instance.new("Frame")
+exportWindow.Name = "ExportWindow"
+exportWindow.Size = UDim2.fromOffset(340, 240)
+exportWindow.Position = UDim2.new(0.5, -170, 0.5, -120)
+exportWindow.BackgroundColor3 = COLOR_BG
+exportWindow.BorderSizePixel = 0
+exportWindow.Visible = false
+exportWindow.ZIndex = 50
+exportWindow.Parent = screenGui
+
+local expCorner = Instance.new("UICorner")
+expCorner.CornerRadius = UDim.new(0, 8)
+expCorner.Parent = exportWindow
+
+local expStroke = Instance.new("UIStroke")
+expStroke.Thickness = 1.6
+expStroke.Color = COLOR_ACCENT
+expStroke.Parent = exportWindow
+
+local expTitle = Instance.new("TextLabel")
+expTitle.Size = UDim2.new(1, -60, 0, 26)
+expTitle.Position = UDim2.new(0, 10, 0, 4)
+expTitle.BackgroundTransparency = 1
+expTitle.Font = Enum.Font.GothamBold
+expTitle.Text = "📋 EXPORTED POSE TABLE"
+expTitle.TextSize = 10
+expTitle.TextColor3 = COLOR_TEXT
+expTitle.TextXAlignment = Enum.TextXAlignment.Left
+expTitle.ZIndex = 51
+expTitle.Parent = exportWindow
+
+local expCloseBtn = Instance.new("TextButton")
+expCloseBtn.Size = UDim2.fromOffset(20, 20)
+expCloseBtn.Position = UDim2.new(1, -26, 0, 6)
+expCloseBtn.BackgroundColor3 = COLOR_DARK
+expCloseBtn.BorderSizePixel = 0
+expCloseBtn.Font = Enum.Font.GothamBold
+expCloseBtn.Text = "X"
+expCloseBtn.TextSize = 10
+expCloseBtn.TextColor3 = Color3.fromRGB(240, 80, 80)
+expCloseBtn.ZIndex = 51
+expCloseBtn.Parent = exportWindow
+
+local expCloseCorner = Instance.new("UICorner")
+expCloseCorner.CornerRadius = UDim.new(0, 4)
+expCloseCorner.Parent = expCloseBtn
+
+local expBox = Instance.new("TextBox")
+expBox.Size = UDim2.new(1, -20, 1, -74)
+expBox.Position = UDim2.new(0, 10, 0, 32)
+expBox.BackgroundColor3 = COLOR_DARK
+expBox.BorderSizePixel = 0
+expBox.Font = Enum.Font.Code
+expBox.TextSize = 8
+expBox.TextColor3 = COLOR_TEXT
+expBox.TextXAlignment = Enum.TextXAlignment.Left
+expBox.TextYAlignment = Enum.TextYAlignment.Top
+expBox.ClearTextOnFocus = false
+expBox.MultiLine = true
+expBox.ZIndex = 51
+expBox.Parent = exportWindow
+
+local expBoxCorner = Instance.new("UICorner")
+expBoxCorner.CornerRadius = UDim.new(0, 6)
+expBoxCorner.Parent = expBox
+
+local copyBtn = Instance.new("TextButton")
+copyBtn.Size = UDim2.new(1, -20, 0, 26)
+copyBtn.Position = UDim2.new(0, 10, 1, -34)
+copyBtn.BackgroundColor3 = COLOR_ACCENT
+copyBtn.BorderSizePixel = 0
+copyBtn.Font = Enum.Font.GothamBold
+copyBtn.Text = "📋 COPY TO CLIPBOARD"
+copyBtn.TextSize = 10
+copyBtn.TextColor3 = COLOR_BG
+copyBtn.ZIndex = 51
+copyBtn.Parent = exportWindow
+
+local copyCorner = Instance.new("UICorner")
+copyCorner.CornerRadius = UDim.new(0, 5)
+copyCorner.Parent = copyBtn
+
+expCloseBtn.Activated:Connect(function()
+	exportWindow.Visible = false
+end)
+
+local function buildExportString()
+	local lines = {}
+	table.insert(lines, "local CustomStandPose = {")
+	table.insert(lines, string.format("\tRigType = %q,", currentRigType))
+	table.insert(lines, "\tJoints = {")
+
+	for jointName, data in pairs(poseData) do
+		-- Only export joints that have non-zero modifications
+		if data.Pos.Magnitude > 0.001 or data.Rot.Magnitude > 0.001 then
+			table.insert(lines, string.format(
+				"\t\t[%q] = { Pos = Vector3.new(%.2f, %.2f, %.2f), Rot = Vector3.new(%d, %d, %d) },",
+				jointName,
+				data.Pos.X, data.Pos.Y, data.Pos.Z,
+				math.floor(data.Rot.X), math.floor(data.Rot.Y), math.floor(data.Rot.Z)
+			))
+		end
+	end
+
+	table.insert(lines, "\t}")
+	table.insert(lines, "}")
+	return table.concat(lines, "\n")
+end
+
+-- 📋 EXPORT BUTTON
+createBottomBtn("📋 EXPORT", 0.68, 0.3, COLOR_LIGHT_DARK, function()
+	local exportStr = buildExportString()
+	expBox.Text = exportStr
+	exportWindow.Visible = true
+end)
+
+-- One-Tap Copy button with fallback
+copyBtn.Activated:Connect(function()
+	local exportStr = expBox.Text
+
+	-- Check for native clipboard support
+	local clipFunc = (setclipboard or toclipboard or (Clipboard and Clipboard.set))
+	if clipFunc then
+		pcall(function() clipFunc(exportStr) end)
+		copyBtn.Text = "✅ COPIED!"
+		task.delay(1.5, function() copyBtn.Text = "📋 COPY TO CLIPBOARD" end)
+	else
+		-- Tablet Fallback: Highlight text and capture focus for Android/HarmonyOS copy tooltip
+		expBox:CaptureFocus()
+		expBox.SelectionStart = 1
+		expBox.CursorPosition = #exportStr + 1
+		copyBtn.Text = "👆 TAP NATIVE 'COPY' ABOVE!"
+		task.delay(2, function() copyBtn.Text = "📋 COPY TO CLIPBOARD" end)
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- 11. ANIMATION FREEZING & REAL-TIME JOINT APPLICATION
+--------------------------------------------------------------------------------
+
+-- Auto-detect rig on load
+local function detectRig()
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hum and hum.RigType == Enum.HumanoidRigType.R6 then
+		currentRigType = "R6"
+		activeJointList = R6_JOINTS
+	else
+		currentRigType = "R15"
+		activeJointList = R15_JOINTS
+	end
+	rigToggleBtn.Text = "RIG: " .. currentRigType
+	initPoseData()
+	buildLimbButtons()
+	refreshSliders()
+end
+
+detectRig()
+player.CharacterAdded:Connect(detectRig)
+
+-- Runs every frame before physics to apply custom joint transforms and freeze animations
+RunService.Stepped:Connect(function()
+	local char = player.Character
+	if not char then return end
+
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	local animator = hum and hum:FindFirstChildOfClass("Animator")
+
+	-- Freeze active animation tracks so idle/breathing doesn't fight your pose
+	if animator then
+		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+			track:AdjustSpeed(0)
+		end
+	end
+
+	-- Apply custom transforms to each joint
+	for _, def in ipairs(activeJointList) do
+		local data = poseData[def.JointName]
+		if data then
+			local parentPart = char:FindFirstChild(def.ParentPart)
+			local joint = parentPart and parentPart:FindFirstChild(def.JointName)
+
+			if joint and joint:IsA("Motor6D") then
+				local radX = math.rad(data.Rot.X)
+				local radY = math.rad(data.Rot.Y)
+				local radZ = math.rad(data.Rot.Z)
+
+				joint.Transform = CFrame.new(data.Pos) * CFrame.fromEulerAnglesXYZ(radX, radY, radZ)
+			end
+		end
+	end
+end)
