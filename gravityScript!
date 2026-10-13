@@ -8,7 +8,7 @@ local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 
 --------------------------------------------------------------------------------
--- 1. SETTINGS & CUSTOM STAND POSE
+-- 1. PALETTE & CUSTOM POSES
 --------------------------------------------------------------------------------
 
 local COLOR_BG = Color3.fromRGB(15, 17, 22)
@@ -18,18 +18,81 @@ local COLOR_ACTIVE = Color3.fromRGB(48, 54, 70)
 local COLOR_TEXT = Color3.fromRGB(240, 240, 240)
 local COLOR_MUTED = Color3.fromRGB(115, 120, 135)
 
--- Your Custom Dialed-in R6 Stand Pose
-local CustomStandPose = {
-	RigType = "R6",
-	Joints = {
-		["Left Shoulder"]  = { Pos = Vector3.new(0.00, -0.50, 0.00), Rot = Vector3.new(-15, 29, -122) },
-		["Right Shoulder"] = { Pos = Vector3.new(-0.35, 0.06, -0.04), Rot = Vector3.new(33, 0, 0) },
-		["Neck"]           = { Pos = Vector3.new(0.00, -0.21, -0.00), Rot = Vector3.new(19, 0, 0) },
-		["Right Hip"]      = { Pos = Vector3.new(0.55, 0.37, 0.13), Rot = Vector3.new(-2, -22, -9) },
-		["Left Hip"]       = { Pos = Vector3.new(-0.36, 0.16, 0.16), Rot = Vector3.new(0, 4, 21) },
-		["RootJoint"]      = { Pos = Vector3.new(0.00, 0.00, 0.00), Rot = Vector3.new(-9, 0, 0) },
-	}
+-- Static Zero-G Spread-Eagle Pose
+local RAW_ZERO_G_POSE = {
+	["Left Shoulder"]  = { Pos = Vector3.new(0.00, 0.00, 0.69),   Rot = Vector3.new(-124, 36, 0) },
+	["Right Shoulder"] = { Pos = Vector3.new(-0.00, 0.00, 0.69),  Rot = Vector3.new(-124, -37, 0) },
+	["Neck"]           = { Pos = Vector3.new(0.00, 0.00, -0.10),  Rot = Vector3.new(-4, 0, 0) },
+	["Right Hip"]      = { Pos = Vector3.new(-0.29, 0.40, 0.02),  Rot = Vector3.new(-35, -49, -15) },
+	["Left Hip"]       = { Pos = Vector3.new(0.29, 0.40, 0.02),   Rot = Vector3.new(-35, 48, 14) },
+	["RootJoint"]      = { Pos = Vector3.zero,                    Rot = Vector3.zero },
 }
+
+-- Directional Stand Poses (R6)
+local RAW_STAND_POSES = {
+	Idle = {
+		["Left Shoulder"]  = { Pos = Vector3.new(0.38, 0.03, 0.00),   Rot = Vector3.new(-10, -35, -13) },
+		["Right Shoulder"] = { Pos = Vector3.new(0.00, -0.21, -0.21), Rot = Vector3.new(-12, -44, 0) },
+		["Neck"]           = { Pos = Vector3.new(0.00, -0.02, -0.08), Rot = Vector3.new(17, 1, -106) },
+		["Right Hip"]      = { Pos = Vector3.new(-0.41, 0.17, 0.00),  Rot = Vector3.new(0, -58, 0) },
+		["Left Hip"]       = { Pos = Vector3.new(0.00, 0.54, 0.00),   Rot = Vector3.new(10, 59, -9) },
+		["RootJoint"]      = { Pos = Vector3.zero,                    Rot = Vector3.new(0, 6, 112) },
+	},
+	Front = {
+		["Left Shoulder"]  = { Pos = Vector3.new(0.38, 0.03, 0.10),   Rot = Vector3.new(-33, -35, -13) },
+		["Right Shoulder"] = { Pos = Vector3.new(0.00, -0.21, -0.21), Rot = Vector3.new(-7, -23, 15) },
+		["Neck"]           = { Pos = Vector3.new(0.00, -0.02, -0.08), Rot = Vector3.new(17, 1, -106) },
+		["Right Hip"]      = { Pos = Vector3.new(-0.41, 0.17, 0.00),  Rot = Vector3.new(0, -58, -17) },
+		["Left Hip"]       = { Pos = Vector3.new(0.00, 0.54, 0.00),   Rot = Vector3.new(10, 59, -18) },
+		["RootJoint"]      = { Pos = Vector3.zero,                    Rot = Vector3.new(21, 0, 112) },
+	},
+	Back = {
+		["Left Shoulder"]  = { Pos = Vector3.new(0.38, 0.03, 0.10),   Rot = Vector3.new(-23, -44, -20) },
+		["Right Shoulder"] = { Pos = Vector3.new(0.00, -0.31, 0.00),  Rot = Vector3.new(-18, -23, 15) },
+		["Neck"]           = { Pos = Vector3.new(0.00, -0.02, -0.08), Rot = Vector3.new(7, -9, -106) },
+		["Right Hip"]      = { Pos = Vector3.new(-0.41, 0.17, 0.00),  Rot = Vector3.new(-3, -58, -17) },
+		["Left Hip"]       = { Pos = Vector3.new(0.00, 0.54, 0.00),   Rot = Vector3.new(14, 59, -18) },
+		["RootJoint"]      = { Pos = Vector3.zero,                    Rot = Vector3.new(-18, 0, 89) },
+	},
+	Left = {
+		["Left Shoulder"]  = { Pos = Vector3.new(0.38, 0.03, 0.10),   Rot = Vector3.new(-23, -44, 6) },
+		["Right Shoulder"] = { Pos = Vector3.new(0.00, -0.31, 0.00),  Rot = Vector3.new(-18, -18, 25) },
+		["Neck"]           = { Pos = Vector3.new(0.00, -0.02, -0.08), Rot = Vector3.new(5, 1, -86) },
+		["Right Hip"]      = { Pos = Vector3.new(-0.41, 0.17, 0.00),  Rot = Vector3.new(-3, -58, -17) },
+		["Left Hip"]       = { Pos = Vector3.new(-0.54, 0.13, 0.33),  Rot = Vector3.new(0, -10, 8) },
+		["RootJoint"]      = { Pos = Vector3.zero,                    Rot = Vector3.new(-2, 19, 95) },
+	},
+	Right = {
+		["Left Shoulder"]  = { Pos = Vector3.new(0.38, 0.03, 0.10),   Rot = Vector3.new(-33, -21, -34) },
+		["Right Shoulder"] = { Pos = Vector3.new(0.00, -0.31, 0.00),  Rot = Vector3.new(-2, -18, 45) },
+		["Neck"]           = { Pos = Vector3.new(0.00, -0.02, -0.08), Rot = Vector3.new(5, 1, -86) },
+		["Right Hip"]      = { Pos = Vector3.new(-0.14, 0.17, 0.00),  Rot = Vector3.new(0, -42, 4) },
+		["Left Hip"]       = { Pos = Vector3.new(-0.54, 0.45, 0.06),  Rot = Vector3.new(-6, 34, -9) },
+		["RootJoint"]      = { Pos = Vector3.zero,                    Rot = Vector3.new(-2, -12, 94) },
+	},
+}
+
+-- Precompute CFrames for performance
+local function toCFrame(entry)
+	local p = entry.Pos
+	local r = entry.Rot
+	return CFrame.new(p) * CFrame.fromEulerAnglesXYZ(math.rad(r.X), math.rad(r.Y), math.rad(r.Z))
+end
+
+local ZERO_G_CFRAMES = {}
+for k, v in pairs(RAW_ZERO_G_POSE) do
+	ZERO_G_CFRAMES[k] = toCFrame(v)
+end
+
+local STAND_CFRAMES = {}
+for poseName, joints in pairs(RAW_STAND_POSES) do
+	STAND_CFRAMES[poseName] = {}
+	for k, v in pairs(joints) do
+		STAND_CFRAMES[poseName][k] = toCFrame(v)
+	end
+end
+
+local currentJointCFrames = {}
 
 local MODES = {
 	{ Id = "Moon",      Name = "🌕 MOON" },
@@ -48,16 +111,16 @@ local lockTarget = nil
 local orbitAngle = 0
 local standHighlight = nil
 
--- Flight Acceleration & Momentum Variables
+-- Flight Acceleration & Momentum
 local MIN_FLIGHT_SPEED = 18
 local MAX_FLIGHT_SPEED = 82
-local ACCELERATION_RATE = 38     -- Studs/s added per second
-local DECELERATION_RATE = 45     -- Studs/s lost when coasting
+local ACCELERATION_RATE = 38
+local DECELERATION_RATE = 45
 local currentSpeed = MIN_FLIGHT_SPEED
 local currentVelocity = Vector3.zero
 
--- Knockback Settings
-local MIN_KNOCKBACK_SPEED = 28   -- Must be flying faster than this to trigger knockback
+-- Knockback
+local MIN_KNOCKBACK_SPEED = 28
 local MAX_KNOCKBACK_FORCE = 75
 local lastImpactTime = 0
 
@@ -126,6 +189,7 @@ barStroke.Thickness = 1.6
 barStroke.Color = COLOR_DARK
 barStroke.Parent = mainBar
 
+-- ZERO-G Toggle
 local zeroGBtn = Instance.new("TextButton")
 zeroGBtn.Name = "ZeroGBtn"
 zeroGBtn.Size = UDim2.new(0.3, 0, 1, -8)
@@ -146,6 +210,7 @@ zStroke.Thickness = 1
 zStroke.Color = COLOR_LIGHT_DARK
 zStroke.Parent = zeroGBtn
 
+-- FOLLOW Toggle
 local lockBtn = Instance.new("TextButton")
 lockBtn.Name = "LockBtn"
 lockBtn.Size = UDim2.new(0.3, 0, 1, -8)
@@ -166,6 +231,7 @@ lStroke.Thickness = 1
 lStroke.Color = COLOR_LIGHT_DARK
 lStroke.Parent = lockBtn
 
+-- Mode Selector Button
 local modeBtn = Instance.new("TextButton")
 modeBtn.Name = "ModeBtn"
 modeBtn.Size = UDim2.new(0.26, 0, 1, -8)
@@ -186,6 +252,7 @@ mStroke.Thickness = 1
 mStroke.Color = COLOR_LIGHT_DARK
 mStroke.Parent = modeBtn
 
+-- Right Drag Handle
 local dragHandle = Instance.new("Frame")
 dragHandle.Name = "DragHandle"
 dragHandle.Size = UDim2.new(0.1, -4, 1, 0)
@@ -204,7 +271,7 @@ gripLabel.TextColor3 = COLOR_MUTED
 gripLabel.Parent = dragHandle
 
 --------------------------------------------------------------------------------
--- 4. 2x3 EMOTE-STYLE MODE POPUP
+-- 4. 2x3 MODE POPUP MENU
 --------------------------------------------------------------------------------
 
 local modeMenu = Instance.new("Frame")
@@ -288,7 +355,7 @@ modeBtn.Activated:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- 5. DRAG LOGIC
+-- 5. DRAG LOGIC (RIGHT EDGE HANDLE)
 --------------------------------------------------------------------------------
 
 local dragging = false
@@ -322,7 +389,7 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 --------------------------------------------------------------------------------
--- 6. STATE CONTROLLERS
+-- 6. TARGET SELECTION & STATE CONTROLS
 --------------------------------------------------------------------------------
 
 local function getCenterScreenTarget()
@@ -434,58 +501,87 @@ lockBtn.Activated:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- 7. R6 STAND POSE APPLICATION (STEPPED)
+-- 7. PROCEDURAL JOINT ENGINE (STEPPED)
 --------------------------------------------------------------------------------
 
-RunService.Stepped:Connect(function()
-	local isStandMode = (isZeroG and isLocked and MODES[currentModeIndex].Id == "Stand")
+RunService.Stepped:Connect(function(t, dt)
 	local char = player.Character
 	if not char then return end
 
-	-- Manage Stand Highlight Aura
-	if isStandMode then
-		if not standHighlight then
-			standHighlight = Instance.new("Highlight")
-			standHighlight.Name = "StandAura"
-			standHighlight.FillColor = Color3.fromRGB(150, 60, 255)
-			standHighlight.FillTransparency = 0.55
-			standHighlight.OutlineColor = currentRgb
-			standHighlight.OutlineTransparency = 0
-			standHighlight.Parent = char
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	local animator = hum and hum:FindFirstChildOfClass("Animator")
+
+	if isZeroG then
+		-- Freeze default walking/falling animations
+		if animator then
+			for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+				track:AdjustSpeed(0)
+			end
+		end
+
+		local isStandActive = (isLocked and lockTarget and lockTarget.Parent and MODES[currentModeIndex].Id == "Stand")
+		local torso = char:FindFirstChild("Torso")
+		local rootPart = char:FindFirstChild("HumanoidRootPart")
+
+		if isStandActive then
+			-- Manage Stand Aura
+			if not standHighlight then
+				standHighlight = Instance.new("Highlight")
+				standHighlight.Name = "StandAura"
+				standHighlight.FillColor = Color3.fromRGB(150, 60, 255)
+				standHighlight.FillTransparency = 0.55
+				standHighlight.OutlineColor = currentRgb
+				standHighlight.OutlineTransparency = 0
+				standHighlight.Parent = char
+			end
+
+			-- Dynamic Directional Stand Pose Selection
+			local targetVel = lockTarget.AssemblyLinearVelocity
+			local localVel = lockTarget.CFrame:VectorToObjectSpace(targetVel)
+
+			local poseKey = "Idle"
+			if localVel.Magnitude >= 2.0 then
+				if math.abs(localVel.Z) > math.abs(localVel.X) then
+					poseKey = (localVel.Z < 0) and "Front" or "Back"
+				else
+					poseKey = (localVel.X < 0) and "Left" or "Right"
+				end
+			end
+
+			local chosenPose = STAND_CFRAMES[poseKey]
+			local breathe = math.sin(os.clock() * 2) * 0.035
+
+			-- Smooth pose interpolation (Lerp)
+			for jointName, targetCF in pairs(chosenPose) do
+				local joint = (torso and torso:FindFirstChild(jointName)) or (rootPart and rootPart:FindFirstChild(jointName))
+				if joint and joint:IsA("Motor6D") then
+					if not currentJointCFrames[jointName] then
+						currentJointCFrames[jointName] = targetCF
+					end
+					currentJointCFrames[jointName] = currentJointCFrames[jointName]:Lerp(targetCF, math.clamp(14 * dt, 0, 1))
+					joint.Transform = currentJointCFrames[jointName] * CFrame.new(0, breathe, 0)
+				end
+			end
+		else
+			cleanStandAura()
+
+			-- Static Zero-G Spread-Eagle Pose
+			for jointName, targetCF in pairs(ZERO_G_CFRAMES) do
+				local joint = (torso and torso:FindFirstChild(jointName)) or (rootPart and rootPart:FindFirstChild(jointName))
+				if joint and joint:IsA("Motor6D") then
+					joint.Transform = targetCF
+				end
+			end
 		end
 	else
 		cleanStandAura()
 	end
-
-	-- Apply your custom R6 joint transforms
-	if isStandMode then
-		local t = os.clock()
-		local breathe = math.sin(t * 2) * 0.04
-
-		local torso = char:FindFirstChild("Torso")
-		local rootPart = char:FindFirstChild("HumanoidRootPart")
-
-		for jointName, data in pairs(CustomStandPose.Joints) do
-			local joint = (torso and torso:FindFirstChild(jointName)) or (rootPart and rootPart:FindFirstChild(jointName))
-
-			if joint and joint:IsA("Motor6D") then
-				local radX = math.rad(data.Rot.X)
-				local radY = math.rad(data.Rot.Y)
-				local radZ = math.rad(data.Rot.Z)
-
-				-- Slight breathing float offset
-				local posOffset = data.Pos + Vector3.new(0, breathe, 0)
-				joint.Transform = CFrame.new(posOffset) * CFrame.fromEulerAnglesXYZ(radX, radY, radZ)
-			end
-		end
-	end
 end)
 
 --------------------------------------------------------------------------------
--- 8. FLIGHT ENGINE & MOMENTUM KNOCKBACK
+-- 8. FLIGHT PHYSICS & MOMENTUM KNOCKBACK
 --------------------------------------------------------------------------------
 
--- Checks for high-speed collisions and applies momentum knockback
 local function checkImpactKnockback(myRoot, speed)
 	if speed < MIN_KNOCKBACK_SPEED or (os.clock() - lastImpactTime < 0.35) then return end
 
@@ -499,17 +595,15 @@ local function checkImpactKnockback(myRoot, speed)
 				if dist <= 4.2 then
 					lastImpactTime = os.clock()
 
-					-- Calculate force ratio based on speed
 					local speedRatio = math.clamp((speed - MIN_KNOCKBACK_SPEED) / (MAX_FLIGHT_SPEED - MIN_KNOCKBACK_SPEED), 0.15, 1.0)
 					local knockbackForce = speedRatio * MAX_KNOCKBACK_FORCE
 
-					-- Direct impulse away from impact + slight vertical lift
 					local impactDir = (oRoot.Position - myRoot.Position).Unit
 					local pushVelocity = (impactDir + Vector3.new(0, 0.3, 0)).Unit * knockbackForce
 
 					oRoot.AssemblyLinearVelocity = pushVelocity
 
-					-- Self-recoil (momentum bounce)
+					-- Self-recoil
 					myRoot.AssemblyLinearVelocity = -impactDir * (speed * 0.3)
 					currentVelocity = -impactDir * (speed * 0.25)
 					break
@@ -582,6 +676,7 @@ RunService.Heartbeat:Connect(function(dt)
 			local floatBob = math.sin(t * 2.5) * 0.35
 			local standCFrame = targetCFrame * CFrame.new(2.5, 2.2 + floatBob, 3.5)
 			root.AssemblyLinearVelocity = (standCFrame.Position - root.Position) * 15 + targetVel
+			-- Keep Stand facing target's forward view
 			root.CFrame = root.CFrame:Lerp(CFrame.lookAt(root.Position, root.Position + targetCFrame.LookVector), 0.25)
 			root.AssemblyAngularVelocity = Vector3.zero
 		end
@@ -591,10 +686,8 @@ RunService.Heartbeat:Connect(function(dt)
 		local moveDir = hum.MoveDirection
 
 		if moveDir.Magnitude > 0 then
-			-- Holding joystick builds speed over time
 			currentSpeed = math.min(MAX_FLIGHT_SPEED, currentSpeed + (ACCELERATION_RATE * dt))
 
-			-- Resolve 3D camera vector
 			local camXZLook = (camera.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
 			local camXZRight = (camera.CFrame.RightVector * Vector3.new(1, 0, 1)).Unit
 
@@ -606,14 +699,10 @@ RunService.Heartbeat:Connect(function(dt)
 				targetDir = targetDir.Unit
 			end
 
-			-- Smooth steering trajectory
 			currentVelocity = currentVelocity:Lerp(targetDir * currentSpeed, 8 * dt)
 			root.AssemblyLinearVelocity = currentVelocity
 
-			-- Banking tilt
 			root.AssemblyAngularVelocity = Vector3.new(moveDir.Z * 2, 0, -moveDir.X * 2)
-
-			-- Check for momentum-scaled impacts
 			checkImpactKnockback(root, currentVelocity.Magnitude)
 		else
 			-- Coasting & Deceleration
@@ -623,7 +712,6 @@ RunService.Heartbeat:Connect(function(dt)
 			if currentVelocity.Magnitude > 3 then
 				root.AssemblyLinearVelocity = currentVelocity
 			else
-				-- Idle zero-gravity space drift
 				local driftX = math.noise(os.clock() * 0.3, 0) * 3.5
 				local driftY = math.sin(os.clock() * 0.8) * 2.5
 				local driftZ = math.noise(0, os.clock() * 0.3) * 3.5
