@@ -1,0 +1,378 @@
+-- LocalScript inside StarterPlayerScripts
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+
+--------------------------------------------------------------------------------
+-- 1. PALETTE & CONFIGURATION
+--------------------------------------------------------------------------------
+
+local COLOR_BG = Color3.fromRGB(15, 17, 22)
+local COLOR_DARK = Color3.fromRGB(26, 29, 38)
+local COLOR_TEXT = Color3.fromRGB(240, 240, 240)
+local COLOR_MUTED = Color3.fromRGB(115, 120, 135)
+
+local POSE_CYCLE_INTERVAL = 1.5  -- Change pose every 1.5 seconds
+local TRANSITION_TIME = 0.30     -- 0.3s smooth slerp ease-in, 1.2s freeze hold
+
+--------------------------------------------------------------------------------
+-- 2. THE 6 ICONIC JOJO POSES (R6)
+--------------------------------------------------------------------------------
+
+local RAW_POSES = {
+	{
+		Name = "JOTARO",
+		Joints = {
+			["Left Shoulder"]  = { Pos = Vector3.new(0.00, -0.15, 0.27), Rot = Vector3.new(18, -24, 0) },
+			["Right Shoulder"] = { Pos = Vector3.new(0.24, 0.67, 0.36),  Rot = Vector3.new(-126, -141, -57) },
+			["Neck"]           = { Pos = Vector3.new(0.00, 0.00, 0.00),  Rot = Vector3.new(-7, -2, -28) },
+			["Right Hip"]      = { Pos = Vector3.new(0.00, 0.00, 0.33),  Rot = Vector3.new(-1, -36, -11) },
+			["Left Hip"]       = { Pos = Vector3.new(0.00, 0.00, 0.00),  Rot = Vector3.new(0, 0, 10) },
+			["RootJoint"]      = { Pos = Vector3.new(0.00, 0.00, 0.00),  Rot = Vector3.new(-3, -6, 56) },
+		}
+	},
+	{
+		Name = "JONATHAN",
+		Joints = {
+			["Left Shoulder"]  = { Pos = Vector3.new(0.00, -0.40, 0.25), Rot = Vector3.new(139, -57, -53) },
+			["Right Shoulder"] = { Pos = Vector3.new(-0.38, -0.46, 0.16), Rot = Vector3.new(-35, 29, -29) },
+			["Neck"]           = { Pos = Vector3.new(0.16, 0.00, 0.00),  Rot = Vector3.new(0, 12, 9) },
+			["Right Hip"]      = { Pos = Vector3.new(0.32, 0.00, 0.00),  Rot = Vector3.new(-13, 17, -4) },
+			["Left Hip"]       = { Pos = Vector3.new(-0.14, 0.13, 0.00), Rot = Vector3.new(-18, -15, 25) },
+			["RootJoint"]      = { Pos = Vector3.new(0.00, 0.00, 0.00),  Rot = Vector3.new(0, 4, -3) },
+		}
+	},
+	{
+		Name = "DIO",
+		Joints = {
+			["Left Shoulder"]  = { Pos = Vector3.new(0.00, 0.00, 0.00),  Rot = Vector3.new(5, 64, -40) },
+			["Right Shoulder"] = { Pos = Vector3.new(0.00, 0.00, 0.00),  Rot = Vector3.new(-5, -40, 52) },
+			["Neck"]           = { Pos = Vector3.new(0.00, -0.21, 0.00), Rot = Vector3.new(44, 27, -12) },
+			["Right Hip"]      = { Pos = Vector3.new(0.89, 0.03, 0.00),  Rot = Vector3.new(-28, 34, -85) },
+			["Left Hip"]       = { Pos = Vector3.new(0.00, 0.00, 0.00),  Rot = Vector3.new(5, 22, 13) },
+			["RootJoint"]      = { Pos = Vector3.new(0.00, 0.00, -0.85), Rot = Vector3.new(-39, -19, -19) },
+		}
+	},
+	{
+		Name = "KIRA",
+		Joints = {
+			["Left Shoulder"]  = { Pos = Vector3.new(-0.11, -0.12, 0.01), Rot = Vector3.new(23, -59, -10) },
+			["Right Shoulder"] = { Pos = Vector3.new(0.48, 0.48, 0.62),   Rot = Vector3.new(84, 16, 11) },
+			["Neck"]           = { Pos = Vector3.new(0.00, 0.00, 0.00),   Rot = Vector3.new(0, 0, -18) },
+			["Right Hip"]      = { Pos = Vector3.new(0.84, 0.05, -0.16),  Rot = Vector3.new(-15, 31, -15) },
+			["Left Hip"]       = { Pos = Vector3.new(-0.64, 0.05, 0.13),  Rot = Vector3.new(-24, -33, 27) },
+			["RootJoint"]      = { Pos = Vector3.new(0.39, 0.00, 0.00),   Rot = Vector3.new(0, 6, 12) },
+		}
+	},
+	{
+		Name = "GIORNO",
+		Joints = {
+			["Left Shoulder"]  = { Pos = Vector3.new(0.25, -0.34, 0.48),   Rot = Vector3.new(123, -54, -34) },
+			["Right Shoulder"] = { Pos = Vector3.new(1.16, -0.85, -0.88),  Rot = Vector3.new(51, -86, -13) },
+			["Neck"]           = { Pos = Vector3.new(0.00, 0.00, 0.00),   Rot = Vector3.new(5, 10, 2) },
+			["Right Hip"]      = { Pos = Vector3.new(0.37, 0.09, 0.16),   Rot = Vector3.new(2, -30, -16) },
+			["Left Hip"]       = { Pos = Vector3.new(0.23, 0.24, 0.07),   Rot = Vector3.new(-9, 17, 18) },
+			["RootJoint"]      = { Pos = Vector3.new(0.00, 0.00, -0.25),  Rot = Vector3.new(-8, 4, -10) },
+		}
+	},
+	{
+		Name = "JOHNNY",
+		Joints = {
+			["Left Shoulder"]  = { Pos = Vector3.new(0.00, 0.00, 0.00),   Rot = Vector3.new(39, -14, -72) },
+			["Right Shoulder"] = { Pos = Vector3.new(0.00, 0.00, 0.00),   Rot = Vector3.new(5, 47, 17) },
+			["Neck"]           = { Pos = Vector3.new(0.00, 0.00, 0.00),   Rot = Vector3.new(9, 7, -10) },
+			["Right Hip"]      = { Pos = Vector3.new(0.95, 0.01, -0.51),  Rot = Vector3.new(-101, 4, -84) },
+			["Left Hip"]       = { Pos = Vector3.new(-0.26, 0.05, -0.42), Rot = Vector3.new(-86, -1, 45) },
+			["RootJoint"]      = { Pos = Vector3.new(0.00, 0.00, -1.07),  Rot = Vector3.new(-8, -6, 10) },
+		}
+	},
+}
+
+local function toCFrame(entry)
+	local p = entry.Pos
+	local r = entry.Rot
+	return CFrame.new(p) * CFrame.fromEulerAnglesXYZ(math.rad(r.X), math.rad(r.Y), math.rad(r.Z))
+end
+
+local POSES_CFRAMES = {}
+for i, data in ipairs(RAW_POSES) do
+	POSES_CFRAMES[i] = {
+		Name = data.Name,
+		Joints = {}
+	}
+	for jointName, rawJoint in pairs(data.Joints) do
+		POSES_CFRAMES[i].Joints[jointName] = toCFrame(rawJoint)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- 3. STATE & RGB ENGINE
+--------------------------------------------------------------------------------
+
+local isPosingActive = false
+local currentPoseIndex = 1
+local transitionStartTime = 0
+local lastSwitchTime = 0
+
+local startJointCFrames = {}
+local activeJointCFrames = {}
+
+local currentRgb = Color3.fromRGB(0, 245, 215)
+local rgbItems = {}
+
+local function registerRgb(inst, prop)
+	table.insert(rgbItems, { Instance = inst, Property = prop })
+end
+
+local function unregisterRgb(inst)
+	for i = #rgbItems, 1, -1 do
+		if rgbItems[i].Instance == inst then
+			table.remove(rgbItems, i)
+		end
+	end
+end
+
+RunService.RenderStepped:Connect(function()
+	currentRgb = Color3.fromHSV((os.clock() * 0.4) % 1, 0.85, 1)
+	for i = #rgbItems, 1, -1 do
+		local item = rgbItems[i]
+		if item.Instance and item.Instance.Parent then
+			item.Instance[item.Property] = currentRgb
+		else
+			table.remove(rgbItems, i)
+		end
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- 4. TABLET-FRIENDLY UI (DRAGGABLE CAPSULE)
+--------------------------------------------------------------------------------
+
+local playerGui = player:WaitForChild("PlayerGui")
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "JoJoPoseLooperGui"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.DisplayOrder = 999
+screenGui.Parent = playerGui
+
+local toggleBtn = Instance.new("Frame")
+toggleBtn.Name = "PoseTogglePill"
+toggleBtn.Size = UDim2.fromOffset(130, 36)
+toggleBtn.Position = UDim2.new(0.85, -65, 0.65, 0)
+toggleBtn.BackgroundColor3 = COLOR_BG
+toggleBtn.BorderSizePixel = 0
+toggleBtn.Active = true
+toggleBtn.Parent = screenGui
+
+local btnCorner = Instance.new("UICorner")
+btnCorner.CornerRadius = UDim.new(0, 18)
+btnCorner.Parent = toggleBtn
+
+local btnStroke = Instance.new("UIStroke")
+btnStroke.Thickness = 1.8
+btnStroke.Color = COLOR_DARK
+btnStroke.Parent = toggleBtn
+
+local iconLabel = Instance.new("TextLabel")
+iconLabel.Size = UDim2.new(0, 26, 1, 0)
+iconLabel.Position = UDim2.new(0, 8, 0, 0)
+iconLabel.BackgroundTransparency = 1
+iconLabel.Text = "🌟"
+iconLabel.TextSize = 14
+iconLabel.TextColor3 = COLOR_MUTED
+iconLabel.Parent = toggleBtn
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, -38, 1, 0)
+statusLabel.Position = UDim2.new(0, 32, 0, 0)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Font = Enum.Font.GothamBold
+statusLabel.Text = "JOJO: OFF"
+statusLabel.TextSize = 10
+statusLabel.TextColor3 = COLOR_MUTED
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.Parent = toggleBtn
+
+-- Touch / Drag Logic
+local dragging = false
+local dragStart = Vector2.zero
+local startPos = UDim2.new()
+local movedDist = 0
+
+toggleBtn.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = true
+		dragStart = input.Position
+		startPos = toggleBtn.Position
+		movedDist = 0
+
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+				-- Clean tap (< 8 px movement) toggles posing
+				if movedDist < 8 then
+					isPosingActive = not isPosingActive
+					local char = player.Character
+					local root = char and char:FindFirstChild("HumanoidRootPart")
+					local hum = char and char:FindFirstChildOfClass("Humanoid")
+					local torso = char and char:FindFirstChild("Torso")
+
+					if isPosingActive then
+						-- Turn ON
+						currentPoseIndex = 1
+						transitionStartTime = os.clock()
+						lastSwitchTime = os.clock()
+						registerRgb(btnStroke, "Color")
+
+						-- Store starting CFrame of each joint
+						for jointName, _ in pairs(POSES_CFRAMES[1].Joints) do
+							local joint = (torso and torso:FindFirstChild(jointName)) or (root and root:FindFirstChild(jointName))
+							startJointCFrames[jointName] = (joint and joint.Transform) or CFrame.identity
+							activeJointCFrames[jointName] = startJointCFrames[jointName]
+						end
+
+						-- Freeze In Place
+						if root then root.Anchored = true end
+						if hum then
+							hum.WalkSpeed = 0
+							hum.JumpPower = 0
+						end
+					else
+						-- Turn OFF
+						unregisterRgb(btnStroke)
+						btnStroke.Color = COLOR_DARK
+						statusLabel.Text = "JOJO: OFF"
+						statusLabel.TextColor3 = COLOR_MUTED
+
+						-- Unfreeze & restore movement
+						if root then root.Anchored = false end
+						if hum then
+							hum.WalkSpeed = 16
+							hum.JumpPower = 50
+						end
+
+						-- Restore normal default joints
+						if torso then
+							for jointName, _ in pairs(POSES_CFRAMES[1].Joints) do
+								local joint = torso:FindFirstChild(jointName) or (root and root:FindFirstChild(jointName))
+								if joint then
+									joint.Transform = CFrame.identity
+								end
+							end
+						end
+					end
+				end
+			end
+		end)
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+		local delta = input.Position - dragStart
+		movedDist = (Vector2.new(input.Position.X, input.Position.Y) - Vector2.new(dragStart.X, dragStart.Y)).Magnitude
+
+		toggleBtn.Position = UDim2.new(
+			startPos.X.Scale,
+			startPos.X.Offset + delta.X,
+			startPos.Y.Scale,
+			startPos.Y.Offset + delta.Y
+		)
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- 5. FLASH AURA & JOINT ENGINE
+--------------------------------------------------------------------------------
+
+local poseHighlight = nil
+
+local function flashPoseAura(char)
+	if not poseHighlight then
+		poseHighlight = Instance.new("Highlight")
+		poseHighlight.Name = "JoJoAuraFlash"
+		poseHighlight.FillColor = currentRgb
+		poseHighlight.FillTransparency = 0.35
+		poseHighlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+		poseHighlight.OutlineTransparency = 0
+		poseHighlight.Parent = char
+	end
+
+	poseHighlight.FillColor = currentRgb
+	poseHighlight.FillTransparency = 0.3
+	local tween = TweenService:Create(
+		poseHighlight,
+		TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ FillTransparency = 0.85 }
+	)
+	tween:Play()
+end
+
+-- Physics Loop: Evaluates transitions and applies non-twisting Slerp
+RunService.Stepped:Connect(function()
+	local char = player.Character
+	if not char or not isPosingActive then
+		if poseHighlight then
+			poseHighlight:Destroy()
+			poseHighlight = nil
+		end
+		return
+	end
+
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	local root = char:FindFirstChild("HumanoidRootPart")
+	local torso = char:FindFirstChild("Torso")
+	local animator = hum and hum:FindFirstChildOfClass("Animator")
+
+	-- Freeze active animations so they don't fight your pose
+	if animator then
+		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+			track:AdjustSpeed(0)
+		end
+	end
+
+	local now = os.clock()
+
+	-- Cycle poses every 1.5s
+	if now - lastSwitchTime >= POSE_CYCLE_INTERVAL then
+		lastSwitchTime = now
+		transitionStartTime = now
+
+		-- Snapshot current transforms as the start for the next ease
+		for jointName, cf in pairs(activeJointCFrames) do
+			startJointCFrames[jointName] = cf
+		end
+
+		currentPoseIndex = (currentPoseIndex % #POSES_CFRAMES) + 1
+		flashPoseAura(char)
+	end
+
+	-- Update UI Status
+	local activePose = POSES_CFRAMES[currentPoseIndex]
+	statusLabel.Text = string.format("%d/6: %s", currentPoseIndex, activePose.Name)
+	statusLabel.TextColor3 = COLOR_TEXT
+
+	-- Fixed Transition Math: TRANSITION_TIME correctly referenced
+	local elapsed = now - transitionStartTime
+	local rawAlpha = math.clamp(elapsed / TRANSITION_TIME, 0, 1)
+	local smoothAlpha = rawAlpha * rawAlpha * (3 - 2 * rawAlpha) -- Smoothstep
+
+	for jointName, targetCF in pairs(activePose.Joints) do
+		local joint = (torso and torso:FindFirstChild(jointName)) or (root and root:FindFirstChild(jointName))
+		if joint and joint:IsA("Motor6D") then
+			local startCF = startJointCFrames[jointName] or targetCF
+
+			-- Slerp (Shortest rotational arc - prevents unhuman twisting)
+			local blendedCF = startCF:Lerp(targetCF, smoothAlpha)
+			activeJointCFrames[jointName] = blendedCF
+
+			joint.Transform = blendedCF
+		end
+	end
+end)
