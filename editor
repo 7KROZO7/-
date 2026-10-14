@@ -15,121 +15,269 @@ local COLOR_BG = Color3.fromRGB(15, 17, 22)
 local COLOR_HEADER = Color3.fromRGB(22, 25, 32)
 local COLOR_DARK = Color3.fromRGB(26, 29, 38)
 local COLOR_LIGHT_DARK = Color3.fromRGB(36, 41, 54)
+local COLOR_ACTIVE = Color3.fromRGB(48, 56, 74)
 local COLOR_ACCENT = Color3.fromRGB(0, 245, 215)
 local COLOR_TEXT = Color3.fromRGB(240, 240, 240)
 local COLOR_MUTED = Color3.fromRGB(115, 120, 135)
 
 --------------------------------------------------------------------------------
--- 2. RIG DEFINITIONS & POSE DATA
+-- 2. RIG DEFINITIONS
 --------------------------------------------------------------------------------
 
 local R6_JOINTS = {
-	{ Name = "Head",       JointName = "Neck",           ParentPart = "Torso" },
-	{ Name = "Torso",      JointName = "RootJoint",      ParentPart = "HumanoidRootPart" },
-	{ Name = "Right Arm",  JointName = "Right Shoulder", ParentPart = "Torso" },
-	{ Name = "Left Arm",   JointName = "Left Shoulder",  ParentPart = "Torso" },
-	{ Name = "Right Leg",  JointName = "Right Hip",      ParentPart = "Torso" },
-	{ Name = "Left Leg",   JointName = "Left Hip",       ParentPart = "Torso" },
+	{ Name = "Head",       PartName = "Head",      JointName = "Neck",           ParentPart = "Torso" },
+	{ Name = "Torso",      PartName = "Torso",     JointName = "RootJoint",      ParentPart = "HumanoidRootPart" },
+	{ Name = "Right Arm",  PartName = "Right Arm", JointName = "Right Shoulder", ParentPart = "Torso" },
+	{ Name = "Left Arm",   PartName = "Left Arm",  JointName = "Left Shoulder",  ParentPart = "Torso" },
+	{ Name = "Right Leg",  PartName = "Right Leg", JointName = "Right Hip",      ParentPart = "Torso" },
+	{ Name = "Left Leg",   PartName = "Left Leg",  JointName = "Left Hip",       ParentPart = "Torso" },
 }
 
 local R15_JOINTS = {
-	{ Name = "Head",            JointName = "Neck",          ParentPart = "UpperTorso" },
-	{ Name = "UpperTorso",      JointName = "Waist",         ParentPart = "LowerTorso" },
-	{ Name = "LowerTorso",      JointName = "Root",          ParentPart = "HumanoidRootPart" },
-	{ Name = "Right UpperArm",  JointName = "RightShoulder", ParentPart = "UpperTorso" },
-	{ Name = "Right LowerArm",  JointName = "RightElbow",    ParentPart = "RightUpperArm" },
-	{ Name = "Right Hand",      JointName = "RightWrist",    ParentPart = "RightLowerArm" },
-	{ Name = "Left UpperArm",   JointName = "LeftShoulder",  ParentPart = "UpperTorso" },
-	{ Name = "Left LowerArm",   JointName = "LeftElbow",     ParentPart = "LeftUpperArm" },
-	{ Name = "Left Hand",       JointName = "LeftWrist",     ParentPart = "LeftLowerArm" },
-	{ Name = "Right UpperLeg",  JointName = "RightHip",      ParentPart = "LowerTorso" },
-	{ Name = "Right LowerLeg",  JointName = "RightKnee",     ParentPart = "RightUpperLeg" },
-	{ Name = "Right Foot",      JointName = "RightAnkle",    ParentPart = "RightLowerLeg" },
-	{ Name = "Left UpperLeg",   JointName = "LeftHip",       ParentPart = "LowerTorso" },
-	{ Name = "Left LowerLeg",   JointName = "LeftKnee",      ParentPart = "LeftUpperLeg" },
-	{ Name = "Left Foot",       JointName = "LeftAnkle",     ParentPart = "LeftLowerLeg" },
+	{ Name = "Head",            PartName = "Head",          JointName = "Neck",          ParentPart = "UpperTorso" },
+	{ Name = "UpperTorso",      PartName = "UpperTorso",    JointName = "Waist",         ParentPart = "LowerTorso" },
+	{ Name = "LowerTorso",      PartName = "LowerTorso",    JointName = "Root",          ParentPart = "HumanoidRootPart" },
+	{ Name = "Right UpperArm",  PartName = "RightUpperArm", JointName = "RightShoulder", ParentPart = "UpperTorso" },
+	{ Name = "Right LowerArm",  PartName = "RightLowerArm", JointName = "RightElbow",    ParentPart = "RightUpperArm" },
+	{ Name = "Right Hand",      PartName = "RightHand",     JointName = "RightWrist",    ParentPart = "RightLowerArm" },
+	{ Name = "Left UpperArm",   PartName = "LeftUpperArm",  JointName = "LeftShoulder",  ParentPart = "UpperTorso" },
+	{ Name = "Left LowerArm",   PartName = "LeftLowerArm",  JointName = "LeftElbow",     ParentPart = "LeftUpperArm" },
+	{ Name = "Left Hand",       PartName = "LeftHand",      JointName = "LeftWrist",     ParentPart = "LeftLowerArm" },
+	{ Name = "Right UpperLeg",  PartName = "RightUpperLeg", JointName = "RightHip",      ParentPart = "LowerTorso" },
+	{ Name = "Right LowerLeg",  PartName = "RightLowerLeg", JointName = "RightKnee",     ParentPart = "RightUpperLeg" },
+	{ Name = "Right Foot",      PartName = "RightFoot",     JointName = "RightAnkle",    ParentPart = "RightLowerLeg" },
+	{ Name = "Left UpperLeg",   PartName = "LeftUpperLeg",  JointName = "LeftHip",       ParentPart = "LowerTorso" },
+	{ Name = "Left LowerLeg",   PartName = "LeftLowerLeg",  JointName = "LeftKnee",      ParentPart = "LeftUpperLeg" },
+	{ Name = "Left Foot",       PartName = "LeftFoot",      JointName = "LeftAnkle",     ParentPart = "LeftLowerLeg" },
 }
 
-local currentRigType = "R15"
-local activeJointList = R15_JOINTS
+local currentRigType = "R6"
+local activeJointList = R6_JOINTS
 local selectedLimbIndex = 1
 local poseData = {} -- [JointName] = { Pos = Vector3, Rot = Vector3 }
+
+-- History Stacks
+local undoStack = {}
+local redoStack = {}
+
+local function clonePoseData(src)
+	local copy = {}
+	for k, v in pairs(src) do
+		copy[k] = { Pos = v.Pos, Rot = v.Rot }
+	end
+	return copy
+end
+
+local function pushHistory()
+	table.insert(undoStack, clonePoseData(poseData))
+	if #undoStack > 25 then
+		table.remove(undoStack, 1)
+	end
+	redoStack = {} -- Reset redo stack on new action
+end
 
 local function initPoseData()
 	poseData = {}
 	for _, def in ipairs(activeJointList) do
-		poseData[def.JointName] = {
-			Pos = Vector3.zero,
-			Rot = Vector3.zero,
-		}
+		poseData[def.JointName] = { Pos = Vector3.zero, Rot = Vector3.zero }
 	end
+	undoStack = {}
+	redoStack = {}
 end
 initPoseData()
 
 --------------------------------------------------------------------------------
--- 3. SELECTION HIGHLIGHT
+-- 3. 3D GROUND COMPASS (FRONT & BACK INDICATOR)
 --------------------------------------------------------------------------------
 
+local compassPart = Instance.new("Part")
+compassPart.Name = "PoseEditorCompass"
+compassPart.Size = Vector3.new(7.5, 0.05, 7.5)
+compassPart.Transparency = 1
+compassPart.CanCollide = false
+compassPart.CanQuery = false
+compassPart.CanTouch = false
+compassPart.Anchored = true
+compassPart.Parent = workspace
+
+local compassGui = Instance.new("SurfaceGui")
+compassGui.Name = "CompassGui"
+compassGui.Face = Enum.NormalId.Top
+compassGui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+compassGui.PixelsPerStud = 50
+compassGui.Parent = compassPart
+
+local compassFrame = Instance.new("Frame")
+compassFrame.Size = UDim2.fromScale(1, 1)
+compassFrame.BackgroundTransparency = 1
+compassFrame.Parent = compassGui
+
+-- Outer Ring
+local ring = Instance.new("UIStroke")
+ring.Thickness = 2.5
+ring.Color = COLOR_ACCENT
+ring.Transparency = 0.4
+ring.Parent = compassFrame
+
+local compassCorner = Instance.new("UICorner")
+compassCorner.CornerRadius = UDim.new(1, 0)
+compassCorner.Parent = compassFrame
+
+-- FRONT Indicator (Cyan Arrow)
+local frontLabel = Instance.new("TextLabel")
+frontLabel.Size = UDim2.new(0.5, 0, 0.22, 0)
+frontLabel.Position = UDim2.new(0.25, 0, 0.03, 0)
+frontLabel.BackgroundTransparency = 1
+frontLabel.Font = Enum.Font.GothamBold
+frontLabel.Text = "▲ FRONT"
+frontLabel.TextSize = 22
+frontLabel.TextColor3 = Color3.fromRGB(0, 245, 215)
+frontLabel.Parent = compassFrame
+
+-- BACK Indicator (Red Marker)
+local backLabel = Instance.new("TextLabel")
+backLabel.Size = UDim2.new(0.5, 0, 0.22, 0)
+backLabel.Position = UDim2.new(0.25, 0, 0.75, 0)
+backLabel.BackgroundTransparency = 1
+backLabel.Font = Enum.Font.GothamBold
+backLabel.Text = "▼ BACK"
+backLabel.TextSize = 22
+backLabel.TextColor3 = Color3.fromRGB(240, 80, 80)
+backLabel.Parent = compassFrame
+
+-- Center Dot
+local centerDot = Instance.new("Frame")
+centerDot.Size = UDim2.fromOffset(12, 12)
+centerDot.AnchorPoint = Vector2.new(0.5, 0.5)
+centerDot.Position = UDim2.fromScale(0.5, 0.5)
+centerDot.BackgroundColor3 = COLOR_ACCENT
+centerDot.Parent = compassFrame
+local cdCorner = Instance.new("UICorner")
+cdCorner.CornerRadius = UDim.new(1, 0)
+cdCorner.Parent = centerDot
+
+--------------------------------------------------------------------------------
+-- 4. 3D INTERACTIVE ANIMATION GIZMOS (ARCHANDLES & HANDLES)
+--------------------------------------------------------------------------------
+
+local activeGizmoMode = "Rotate" -- "Rotate" or "Move"
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "StudioPoseEditorGui"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.DisplayOrder = 1000
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+-- 3D Rotation Rings (ArcHandles)
+local arcHandles = Instance.new("ArcHandles")
+arcHandles.Name = "PoseArcHandles"
+arcHandles.Axes = Axes.new(Enum.Axis.X, Enum.Axis.Y, Enum.Axis.Z)
+arcHandles.Color3 = COLOR_ACCENT
+arcHandles.Visible = true
+arcHandles.Parent = screenGui
+
+-- 3D Movement Arrows (Handles)
+local moveHandles = Instance.new("Handles")
+moveHandles.Name = "PoseMoveHandles"
+moveHandles.Style = Enum.HandlesStyle.Movement
+moveHandles.Axes = Axes.new(Enum.Axis.X, Enum.Axis.Y, Enum.Axis.Z)
+moveHandles.Color3 = Color3.fromRGB(80, 170, 255)
+moveHandles.Visible = false
+moveHandles.Parent = screenGui
+
 local limbHighlight = Instance.new("Highlight")
-limbHighlight.Name = "LimbEditorHighlight"
+limbHighlight.Name = "EditorLimbHighlight"
 limbHighlight.FillColor = COLOR_ACCENT
-limbHighlight.FillTransparency = 0.6
+limbHighlight.FillTransparency = 0.65
 limbHighlight.OutlineColor = Color3.fromRGB(255, 255, 255)
 limbHighlight.OutlineTransparency = 0.2
 limbHighlight.Enabled = false
 
-local function updateLimbHighlight()
+local function getSelectedPart()
 	local char = player.Character
-	if not char then
-		limbHighlight.Enabled = false
-		return
-	end
-
+	if not char then return nil end
 	local def = activeJointList[selectedLimbIndex]
-	if not def then
-		limbHighlight.Enabled = false
-		return
-	end
+	if not def then return nil end
+	return char:FindFirstChild(def.PartName)
+end
 
-	-- Locate the body part being posed
-	local targetPart = char:FindFirstChild(def.Name) or char:FindFirstChild(def.JointName)
-	if not targetPart then
-		-- Search by Joint's Part1
-		local parentPart = char:FindFirstChild(def.ParentPart)
-		if parentPart then
-			local joint = parentPart:FindFirstChild(def.JointName)
-			if joint and joint:IsA("Motor6D") and joint.Part1 then
-				targetPart = joint.Part1
-			end
-		end
-	end
-
+local function updateGizmoTarget()
+	local targetPart = getSelectedPart()
 	if targetPart then
+		arcHandles.Adornee = targetPart
+		moveHandles.Adornee = targetPart
 		limbHighlight.Adornee = targetPart
 		limbHighlight.Parent = targetPart
 		limbHighlight.Enabled = true
 	else
+		arcHandles.Adornee = nil
+		moveHandles.Adornee = nil
 		limbHighlight.Enabled = false
 	end
 end
 
---------------------------------------------------------------------------------
--- 4. SCREEN GUI & MAIN WINDOW
---------------------------------------------------------------------------------
+-- Gizmo Drag Logic (Rotation)
+local initialRot = Vector3.zero
+arcHandles.MouseButton1Down:Connect(function()
+	local def = activeJointList[selectedLimbIndex]
+	if def and poseData[def.JointName] then
+		initialRot = poseData[def.JointName].Rot
+	end
+end)
 
-local playerGui = player:WaitForChild("PlayerGui")
+arcHandles.MouseDrag:Connect(function(axis, relativeAngle)
+	local def = activeJointList[selectedLimbIndex]
+	if not def then return end
+	local data = poseData[def.JointName]
+	if not data then return end
 
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "AvatarPoseEditorGui"
-screenGui.ResetOnSpawn = false
-screenGui.IgnoreGuiInset = true
-screenGui.DisplayOrder = 1000
-screenGui.Parent = playerGui
+	local deg = math.deg(relativeAngle)
+	if axis == Enum.Axis.X then
+		data.Rot = Vector3.new(initialRot.X + deg, data.Rot.Y, data.Rot.Z)
+	elseif axis == Enum.Axis.Y then
+		data.Rot = Vector3.new(data.Rot.X, initialRot.Y + deg, data.Rot.Z)
+	elseif axis == Enum.Axis.Z then
+		data.Rot = Vector3.new(data.Rot.X, data.Rot.Y, initialRot.Z + deg)
+	end
+end)
+
+arcHandles.MouseButton1Up:Connect(pushHistory)
+
+-- Gizmo Drag Logic (Translation)
+local initialPos = Vector3.zero
+moveHandles.MouseButton1Down:Connect(function()
+	local def = activeJointList[selectedLimbIndex]
+	if def and poseData[def.JointName] then
+		initialPos = poseData[def.JointName].Pos
+	end
+end)
+
+moveHandles.MouseDrag:Connect(function(axis, relativeDistance)
+	local def = activeJointList[selectedLimbIndex]
+	if not def then return end
+	local data = poseData[def.JointName]
+	if not data then return end
+
+	if axis == Enum.Axis.X then
+		data.Pos = Vector3.new(initialPos.X + relativeDistance, data.Pos.Y, data.Pos.Z)
+	elseif axis == Enum.Axis.Y then
+		data.Pos = Vector3.new(data.Pos.X, initialPos.Y + relativeDistance, data.Pos.Z)
+	elseif axis == Enum.Axis.Z then
+		data.Pos = Vector3.new(data.Pos.X, data.Pos.Y, initialPos.Z + relativeDistance)
+	end
+end)
+
+moveHandles.MouseButton1Up:Connect(pushHistory)
+
+--------------------------------------------------------------------------------
+-- 5. MAIN EDITOR UI WINDOW
+--------------------------------------------------------------------------------
 
 local mainWindow = Instance.new("Frame")
 mainWindow.Name = "PoseEditorWindow"
 mainWindow.Size = UDim2.fromOffset(360, 290)
-mainWindow.Position = UDim2.new(0.5, -180, 0.55, -145)
+mainWindow.Position = UDim2.new(0.5, -180, 0.58, -145)
 mainWindow.BackgroundColor3 = COLOR_BG
 mainWindow.BorderSizePixel = 0
 mainWindow.Active = true
@@ -144,10 +292,10 @@ mainStroke.Thickness = 1.6
 mainStroke.Color = COLOR_ACCENT
 mainStroke.Parent = mainWindow
 
--- Header
+-- Header Bar
 local header = Instance.new("Frame")
 header.Name = "Header"
-header.Size = UDim2.new(1, 0, 0, 30)
+header.Size = UDim2.new(1, 0, 0, 32)
 header.BackgroundColor3 = COLOR_HEADER
 header.BorderSizePixel = 0
 header.Parent = mainWindow
@@ -157,35 +305,60 @@ hCorner.CornerRadius = UDim.new(0, 8)
 hCorner.Parent = header
 
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(0.5, 0, 1, 0)
+title.Size = UDim2.new(0.4, 0, 1, 0)
 title.Position = UDim2.new(0, 10, 0, 0)
 title.BackgroundTransparency = 1
 title.Font = Enum.Font.GothamBold
-title.Text = "🦴 POSE EDITOR (6-DOF)"
-title.TextSize = 11
+title.Text = "🦴 ANIMATION GIZMO"
+title.TextSize = 10
 title.TextColor3 = COLOR_TEXT
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Parent = header
 
+-- Undo / Redo Buttons
+local undoBtn = Instance.new("TextButton")
+undoBtn.Size = UDim2.fromOffset(26, 20)
+undoBtn.Position = UDim2.new(1, -140, 0.5, -10)
+undoBtn.BackgroundColor3 = COLOR_DARK
+undoBtn.BorderSizePixel = 0
+undoBtn.Font = Enum.Font.GothamBold
+undoBtn.Text = "↩"
+undoBtn.TextSize = 12
+undoBtn.TextColor3 = COLOR_TEXT
+undoBtn.Parent = header
+local uCorner = Instance.new("UICorner")
+uCorner.CornerRadius = UDim.new(0, 4)
+uCorner.Parent = undoBtn
+
+local redoBtn = Instance.new("TextButton")
+redoBtn.Size = UDim2.fromOffset(26, 20)
+redoBtn.Position = UDim2.new(1, -110, 0.5, -10)
+redoBtn.BackgroundColor3 = COLOR_DARK
+redoBtn.BorderSizePixel = 0
+redoBtn.Font = Enum.Font.GothamBold
+redoBtn.Text = "↪"
+redoBtn.TextSize = 12
+redoBtn.TextColor3 = COLOR_TEXT
+redoBtn.Parent = header
+local rCorner = Instance.new("UICorner")
+rCorner.CornerRadius = UDim.new(0, 4)
+rCorner.Parent = redoBtn
+
 local rigToggleBtn = Instance.new("TextButton")
 rigToggleBtn.Size = UDim2.fromOffset(72, 20)
-rigToggleBtn.Position = UDim2.new(1, -82, 0.5, -10)
+rigToggleBtn.Position = UDim2.new(1, -80, 0.5, -10)
 rigToggleBtn.BackgroundColor3 = COLOR_DARK
 rigToggleBtn.BorderSizePixel = 0
 rigToggleBtn.Font = Enum.Font.GothamBold
 rigToggleBtn.Text = "RIG: " .. currentRigType
-rigToggleBtn.TextSize = 10
+rigToggleBtn.TextSize = 9
 rigToggleBtn.TextColor3 = COLOR_ACCENT
 rigToggleBtn.Parent = header
-
 local rtCorner = Instance.new("UICorner")
 rtCorner.CornerRadius = UDim.new(0, 4)
 rtCorner.Parent = rigToggleBtn
 
---------------------------------------------------------------------------------
--- 5. DRAG LOGIC
---------------------------------------------------------------------------------
-
+-- Header Dragging
 local dragging = false
 local dragStart = Vector2.zero
 local startPos = UDim2.new()
@@ -222,8 +395,8 @@ end)
 
 local limbScroll = Instance.new("ScrollingFrame")
 limbScroll.Name = "LimbList"
-limbScroll.Size = UDim2.new(0, 105, 1, -72)
-limbScroll.Position = UDim2.new(0, 6, 0, 36)
+limbScroll.Size = UDim2.new(0, 115, 1, -74)
+limbScroll.Position = UDim2.new(0, 6, 0, 38)
 limbScroll.BackgroundColor3 = COLOR_DARK
 limbScroll.BorderSizePixel = 0
 limbScroll.ScrollBarThickness = 3
@@ -238,7 +411,7 @@ lsLayout.Padding = UDim.new(0, 3)
 lsLayout.Parent = limbScroll
 
 local limbButtons = {}
-local refreshSliders -- Forward declaration
+local refreshReadout -- Forward declaration
 
 local function buildLimbButtons()
 	for _, b in ipairs(limbButtons) do b:Destroy() end
@@ -248,7 +421,7 @@ local function buildLimbButtons()
 		local btn = Instance.new("TextButton")
 		btn.Name = def.JointName
 		btn.Size = UDim2.new(1, -6, 0, 22)
-		btn.BackgroundColor3 = (idx == selectedLimbIndex) and COLOR_LIGHT_DARK or COLOR_BG
+		btn.BackgroundColor3 = (idx == selectedLimbIndex) and COLOR_ACTIVE or COLOR_BG
 		btn.BorderSizePixel = 0
 		btn.Font = Enum.Font.GothamBold
 		btn.Text = def.Name
@@ -263,206 +436,220 @@ local function buildLimbButtons()
 		btn.Activated:Connect(function()
 			selectedLimbIndex = idx
 			for i, other in ipairs(limbButtons) do
-				other.BackgroundColor3 = (i == idx) and COLOR_LIGHT_DARK or COLOR_BG
+				other.BackgroundColor3 = (i == idx) and COLOR_ACTIVE or COLOR_BG
 				other.TextColor3 = (i == idx) and COLOR_ACCENT or COLOR_MUTED
 			end
-			updateLimbHighlight()
-			if refreshSliders then refreshSliders() end
+			updateGizmoTarget()
+			if refreshReadout then refreshReadout() end
 		end)
 
 		table.insert(limbButtons, btn)
 	end
 
 	limbScroll.CanvasSize = UDim2.new(0, 0, 0, #activeJointList * 25 + 6)
-	updateLimbHighlight()
+	updateGizmoTarget()
 end
 
 --------------------------------------------------------------------------------
--- 7. RIGHT PANEL: 6-DOF SLIDERS
+-- 7. RIGHT PANEL: GIZMO CONTROLLER & READOUT
 --------------------------------------------------------------------------------
 
-local slidersContainer = Instance.new("ScrollingFrame")
-slidersContainer.Name = "SlidersContainer"
-slidersContainer.Size = UDim2.new(1, -123, 1, -72)
-slidersContainer.Position = UDim2.new(0, 117, 0, 36)
-slidersContainer.BackgroundColor3 = COLOR_DARK
-slidersContainer.BorderSizePixel = 0
-slidersContainer.ScrollBarThickness = 3
-slidersContainer.Parent = mainWindow
+local rightPanel = Instance.new("Frame")
+rightPanel.Name = "GizmoPanel"
+rightPanel.Size = UDim2.new(1, -133, 1, -74)
+rightPanel.Position = UDim2.new(0, 127, 0, 38)
+rightPanel.BackgroundColor3 = COLOR_DARK
+rightPanel.BorderSizePixel = 0
+rightPanel.Parent = mainWindow
 
-local scCorner = Instance.new("UICorner")
-scCorner.CornerRadius = UDim.new(0, 6)
-scCorner.Parent = slidersContainer
+local rpCorner = Instance.new("UICorner")
+rpCorner.CornerRadius = UDim.new(0, 6)
+rpCorner.Parent = rightPanel
 
-local scLayout = Instance.new("UIListLayout")
-scLayout.Padding = UDim.new(0, 4)
-scLayout.Parent = slidersContainer
+-- Gizmo Mode Selector: [ 🔄 ROTATE ] vs [ ✥ MOVE ]
+local modeRow = Instance.new("Frame")
+modeRow.Size = UDim2.new(1, -12, 0, 26)
+modeRow.Position = UDim2.new(0, 6, 0, 6)
+modeRow.BackgroundTransparency = 1
+modeRow.Parent = rightPanel
 
-local sliderControllers = {}
+local rotModeBtn = Instance.new("TextButton")
+rotModeBtn.Size = UDim2.new(0.5, -3, 1, 0)
+rotModeBtn.BackgroundColor3 = COLOR_ACTIVE
+rotModeBtn.BorderSizePixel = 0
+rotModeBtn.Font = Enum.Font.GothamBold
+rotModeBtn.Text = "🔄 ROTATE"
+rotModeBtn.TextSize = 8
+rotModeBtn.TextColor3 = COLOR_ACCENT
+rotModeBtn.Parent = modeRow
+local rmbCorner = Instance.new("UICorner")
+rmbCorner.CornerRadius = UDim.new(0, 4)
+rmbCorner.Parent = rotModeBtn
 
-local function createSlider(title, minVal, maxVal, isDegree, getter, setter)
-	local row = Instance.new("Frame")
-	row.Size = UDim2.new(1, -6, 0, 26)
-	row.BackgroundTransparency = 1
-	row.Parent = slidersContainer
+local moveModeBtn = Instance.new("TextButton")
+moveModeBtn.Size = UDim2.new(0.5, -3, 1, 0)
+moveModeBtn.Position = UDim2.new(0.5, 3, 0, 0)
+moveModeBtn.BackgroundColor3 = COLOR_BG
+moveModeBtn.BorderSizePixel = 0
+moveModeBtn.Font = Enum.Font.GothamBold
+moveModeBtn.Text = "✥ MOVE"
+moveModeBtn.TextSize = 8
+moveModeBtn.TextColor3 = COLOR_MUTED
+moveModeBtn.Parent = modeRow
+local mmbCorner = Instance.new("UICorner")
+mmbCorner.CornerRadius = UDim.new(0, 4)
+mmbCorner.Parent = moveModeBtn
 
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.new(0.48, 0, 1, 0)
-	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.GothamBold
-	label.TextSize = 8
-	label.TextColor3 = COLOR_TEXT
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.Parent = row
-
-	local zeroBtn = Instance.new("TextButton")
-	zeroBtn.Size = UDim2.fromOffset(16, 16)
-	zeroBtn.Position = UDim2.new(0.48, 2, 0.5, -8)
-	zeroBtn.BackgroundColor3 = COLOR_LIGHT_DARK
-	zeroBtn.BorderSizePixel = 0
-	zeroBtn.Font = Enum.Font.GothamBold
-	zeroBtn.Text = "0"
-	zeroBtn.TextSize = 8
-	zeroBtn.TextColor3 = COLOR_MUTED
-	zeroBtn.Parent = row
-	local zc = Instance.new("UICorner")
-	zc.CornerRadius = UDim.new(0, 3)
-	zc.Parent = zeroBtn
-
-	local track = Instance.new("Frame")
-	track.Size = UDim2.new(0.42, 0, 0, 12)
-	track.Position = UDim2.new(1, -95, 0.5, -6)
-	track.BackgroundColor3 = COLOR_BG
-	track.BorderSizePixel = 0
-	track.Active = true
-	track.Parent = row
-	local tc = Instance.new("UICorner")
-	tc.CornerRadius = UDim.new(0, 4)
-	tc.Parent = track
-
-	local fill = Instance.new("Frame")
-	fill.Size = UDim2.new(0.5, 0, 1, 0)
-	fill.BackgroundColor3 = isDegree and COLOR_ACCENT or Color3.fromRGB(80, 170, 255)
-	fill.BorderSizePixel = 0
-	fill.Parent = track
-	local fc = Instance.new("UICorner")
-	fc.CornerRadius = UDim.new(0, 4)
-	fc.Parent = fill
-
-	local function updateDisplay(val)
-		local ratio = math.clamp((val - minVal) / (maxVal - minVal), 0, 1)
-		fill.Size = UDim2.new(ratio, 0, 1, 0)
-		if isDegree then
-			label.Text = string.format("%s: %d°", title, math.floor(val))
-		else
-			label.Text = string.format("%s: %.2f", title, val)
-		end
+local function setGizmoMode(mode)
+	activeGizmoMode = mode
+	if mode == "Rotate" then
+		arcHandles.Visible = true
+		moveHandles.Visible = false
+		rotModeBtn.BackgroundColor3 = COLOR_ACTIVE
+		rotModeBtn.TextColor3 = COLOR_ACCENT
+		moveModeBtn.BackgroundColor3 = COLOR_BG
+		moveModeBtn.TextColor3 = COLOR_MUTED
+	else
+		arcHandles.Visible = false
+		moveHandles.Visible = true
+		moveModeBtn.BackgroundColor3 = COLOR_ACTIVE
+		moveModeBtn.TextColor3 = Color3.fromRGB(80, 170, 255)
+		rotModeBtn.BackgroundColor3 = COLOR_BG
+		rotModeBtn.TextColor3 = COLOR_MUTED
 	end
-
-	local function setValFromX(xPos)
-		local ratio = math.clamp((xPos - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
-		local val = minVal + (maxVal - minVal) * ratio
-		setter(val)
-		updateDisplay(val)
-	end
-
-	local sliding = false
-	track.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-			sliding = true
-			setValFromX(input.Position.X)
-			input.Changed:Connect(function()
-				if input.UserInputState == Enum.UserInputState.End then
-					sliding = false
-				end
-			end)
-		end
-	end)
-
-	UserInputService.InputChanged:Connect(function(input)
-		if sliding and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
-			setValFromX(input.Position.X)
-		end
-	end)
-
-	zeroBtn.Activated:Connect(function()
-		setter(0)
-		updateDisplay(0)
-	end)
-
-	return {
-		Refresh = function()
-			updateDisplay(getter())
-		end
-	}
 end
 
-local function getActivePoseEntry()
+rotModeBtn.Activated:Connect(function() setGizmoMode("Rotate") end)
+moveModeBtn.Activated:Connect(function() setGizmoMode("Move") end)
+
+-- Numeric Real-Time Readout Box
+local readoutFrame = Instance.new("Frame")
+readoutFrame.Size = UDim2.new(1, -12, 0, 94)
+readoutFrame.Position = UDim2.new(0, 6, 0, 38)
+readoutFrame.BackgroundColor3 = COLOR_BG
+readoutFrame.BorderSizePixel = 0
+readoutFrame.Parent = rightPanel
+local rfCorner = Instance.new("UICorner")
+rfCorner.CornerRadius = UDim.new(0, 5)
+rfCorner.Parent = readoutFrame
+
+local partTitle = Instance.new("TextLabel")
+partTitle.Size = UDim2.new(1, -8, 0, 16)
+partTitle.Position = UDim2.new(0, 4, 0, 2)
+partTitle.BackgroundTransparency = 1
+partTitle.Font = Enum.Font.GothamBold
+partTitle.Text = "PART: HEAD"
+partTitle.TextSize = 8
+partTitle.TextColor3 = COLOR_ACCENT
+partTitle.TextXAlignment = Enum.TextXAlignment.Left
+partTitle.Parent = readoutFrame
+
+local rotReadout = Instance.new("TextLabel")
+rotReadout.Size = UDim2.new(1, -8, 0, 28)
+rotReadout.Position = UDim2.new(0, 4, 0, 20)
+rotReadout.BackgroundTransparency = 1
+rotReadout.Font = Enum.Font.Code
+rotReadout.Text = "ROTATION:\nX: 0°  Y: 0°  Z: 0°"
+rotReadout.TextSize = 8
+rotReadout.TextColor3 = COLOR_TEXT
+rotReadout.TextXAlignment = Enum.TextXAlignment.Left
+rotReadout.Parent = readoutFrame
+
+local posReadout = Instance.new("TextLabel")
+posReadout.Size = UDim2.new(1, -8, 0, 28)
+posReadout.Position = UDim2.new(0, 4, 0, 52)
+posReadout.BackgroundTransparency = 1
+posReadout.Font = Enum.Font.Code
+posReadout.Text = "POSITION:\nX: 0.00  Y: 0.00  Z: 0.00"
+posReadout.TextSize = 8
+posReadout.TextColor3 = Color3.fromRGB(80, 170, 255)
+posReadout.TextXAlignment = Enum.TextXAlignment.Left
+posReadout.Parent = readoutFrame
+
+refreshReadout = function()
 	local def = activeJointList[selectedLimbIndex]
-	if not def then return nil end
-	if not poseData[def.JointName] then
-		poseData[def.JointName] = { Pos = Vector3.zero, Rot = Vector3.zero }
+	if not def then return end
+	local data = poseData[def.JointName] or { Pos = Vector3.zero, Rot = Vector3.zero }
+
+	partTitle.Text = "PART: " .. def.Name:upper()
+	rotReadout.Text = string.format("ROTATION:\nX: %d°  Y: %d°  Z: %d°", math.floor(data.Rot.X), math.floor(data.Rot.Y), math.floor(data.Rot.Z))
+	posReadout.Text = string.format("POSITION:\nX: %.2f  Y: %.2f  Z: %.2f", data.Pos.X, data.Pos.Y, data.Pos.Z)
+end
+
+-- Quick Zero Buttons
+local zeroRow = Instance.new("Frame")
+zeroRow.Size = UDim2.new(1, -12, 0, 22)
+zeroRow.Position = UDim2.new(0, 6, 1, -26)
+zeroRow.BackgroundTransparency = 1
+zeroRow.Parent = rightPanel
+
+local zeroRotBtn = Instance.new("TextButton")
+zeroRotBtn.Size = UDim2.new(0.5, -3, 1, 0)
+zeroRotBtn.BackgroundColor3 = COLOR_BG
+zeroRotBtn.BorderSizePixel = 0
+zeroRotBtn.Font = Enum.Font.GothamBold
+zeroRotBtn.Text = "ZERO ROT"
+zeroRotBtn.TextSize = 8
+zeroRotBtn.TextColor3 = COLOR_MUTED
+zeroRotBtn.Parent = zeroRow
+local zrCorner = Instance.new("UICorner")
+zrCorner.CornerRadius = UDim.new(0, 4)
+zrCorner.Parent = zeroRotBtn
+
+local zeroPosBtn = Instance.new("TextButton")
+zeroPosBtn.Size = UDim2.new(0.5, -3, 1, 0)
+zeroPosBtn.Position = UDim2.new(0.5, 3, 0, 0)
+zeroPosBtn.BackgroundColor3 = COLOR_BG
+zeroPosBtn.BorderSizePixel = 0
+zeroPosBtn.Font = Enum.Font.GothamBold
+zeroPosBtn.Text = "ZERO POS"
+zeroPosBtn.TextSize = 8
+zeroPosBtn.TextColor3 = COLOR_MUTED
+zeroPosBtn.Parent = zeroRow
+local zpCorner = Instance.new("UICorner")
+zpCorner.CornerRadius = UDim.new(0, 4)
+zpCorner.Parent = zeroPosBtn
+
+zeroRotBtn.Activated:Connect(function()
+	local def = activeJointList[selectedLimbIndex]
+	if def and poseData[def.JointName] then
+		pushHistory()
+		poseData[def.JointName].Rot = Vector3.zero
+		refreshReadout()
 	end
-	return poseData[def.JointName]
-end
+end)
 
--- Section Label: Position
-local function createSectionHeader(txt, color)
-	local h = Instance.new("TextLabel")
-	h.Size = UDim2.new(1, -6, 0, 16)
-	h.BackgroundTransparency = 1
-	h.Font = Enum.Font.GothamBold
-	h.Text = txt
-	h.TextSize = 8
-	h.TextColor3 = color
-	h.TextXAlignment = Enum.TextXAlignment.Left
-	h.Parent = slidersContainer
-end
-
-createSectionHeader("📍 POSITION (STUDS)", Color3.fromRGB(80, 170, 255))
-
-table.insert(sliderControllers, createSlider("POS X", -3, 3, false,
-	function() local p = getActivePoseEntry(); return p and p.Pos.X or 0 end,
-	function(v) local p = getActivePoseEntry(); if p then p.Pos = Vector3.new(v, p.Pos.Y, p.Pos.Z) end end
-))
-
-table.insert(sliderControllers, createSlider("POS Y", -3, 3, false,
-	function() local p = getActivePoseEntry(); return p and p.Pos.Y or 0 end,
-	function(v) local p = getActivePoseEntry(); if p then p.Pos = Vector3.new(p.Pos.X, v, p.Pos.Z) end end
-))
-
-table.insert(sliderControllers, createSlider("POS Z", -3, 3, false,
-	function() local p = getActivePoseEntry(); return p and p.Pos.Z or 0 end,
-	function(v) local p = getActivePoseEntry(); if p then p.Pos = Vector3.new(p.Pos.X, p.Pos.Y, v) end end
-))
-
-createSectionHeader("🔄 ROTATION (DEGREES)", COLOR_ACCENT)
-
-table.insert(sliderControllers, createSlider("ROT X", -180, 180, true,
-	function() local p = getActivePoseEntry(); return p and p.Rot.X or 0 end,
-	function(v) local p = getActivePoseEntry(); if p then p.Rot = Vector3.new(v, p.Rot.Y, p.Rot.Z) end end
-))
-
-table.insert(sliderControllers, createSlider("ROT Y", -180, 180, true,
-	function() local p = getActivePoseEntry(); return p and p.Rot.Y or 0 end,
-	function(v) local p = getActivePoseEntry(); if p then p.Rot = Vector3.new(p.Rot.X, v, p.Rot.Z) end end
-))
-
-table.insert(sliderControllers, createSlider("ROT Z", -180, 180, true,
-	function() local p = getActivePoseEntry(); return p and p.Rot.Z or 0 end,
-	function(v) local p = getActivePoseEntry(); if p then p.Rot = Vector3.new(p.Rot.X, p.Rot.Y, v) end end
-))
-
-slidersContainer.CanvasSize = UDim2.new(0, 0, 0, 210)
-
-refreshSliders = function()
-	for _, c in ipairs(sliderControllers) do
-		c.Refresh()
+zeroPosBtn.Activated:Connect(function()
+	local def = activeJointList[selectedLimbIndex]
+	if def and poseData[def.JointName] then
+		pushHistory()
+		poseData[def.JointName].Pos = Vector3.zero
+		refreshReadout()
 	end
-end
+end)
 
 --------------------------------------------------------------------------------
--- 8. RIG TOGGLE LOGIC
+-- 8. UNDO & REDO HANDLERS
+--------------------------------------------------------------------------------
+
+undoBtn.Activated:Connect(function()
+	if #undoStack > 0 then
+		table.insert(redoStack, clonePoseData(poseData))
+		poseData = table.remove(undoStack)
+		refreshReadout()
+	end
+end)
+
+redoBtn.Activated:Connect(function()
+	if #redoStack > 0 then
+		table.insert(undoStack, clonePoseData(poseData))
+		poseData = table.remove(redoStack)
+		refreshReadout()
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- 9. RIG TOGGLE LOGIC
 --------------------------------------------------------------------------------
 
 rigToggleBtn.Activated:Connect(function()
@@ -477,11 +664,11 @@ rigToggleBtn.Activated:Connect(function()
 	rigToggleBtn.Text = "RIG: " .. currentRigType
 	initPoseData()
 	buildLimbButtons()
-	refreshSliders()
+	refreshReadout()
 end)
 
 --------------------------------------------------------------------------------
--- 9. BOTTOM ACTION TOOLBAR
+-- 10. BOTTOM TOOLBAR (MIRROR, RESET, EXPORT)
 --------------------------------------------------------------------------------
 
 local function createBottomBtn(text, posX, width, color, callback)
@@ -495,11 +682,9 @@ local function createBottomBtn(text, posX, width, color, callback)
 	btn.TextSize = 9
 	btn.TextColor3 = COLOR_TEXT
 	btn.Parent = mainWindow
-
 	local bc = Instance.new("UICorner")
 	bc.CornerRadius = UDim.new(0, 5)
 	bc.Parent = btn
-
 	btn.Activated:Connect(callback)
 	return btn
 end
@@ -512,7 +697,6 @@ createBottomBtn("🪞 MIRROR", 0.02, 0.3, COLOR_LIGHT_DARK, function()
 	local sourceName = def.JointName
 	local targetName = nil
 
-	-- Pair R15/R6 corresponding limbs
 	local pairsMap = {
 		["Right Shoulder"] = "Left Shoulder",   ["Left Shoulder"] = "Right Shoulder",
 		["Right Hip"]      = "Left Hip",        ["Left Hip"]      = "Right Hip",
@@ -525,22 +709,23 @@ createBottomBtn("🪞 MIRROR", 0.02, 0.3, COLOR_LIGHT_DARK, function()
 
 	targetName = pairsMap[sourceName]
 	if targetName and poseData[sourceName] and poseData[targetName] then
+		pushHistory()
 		local s = poseData[sourceName]
-		-- Invert X position and Y/Z rotation for natural anatomical symmetry
 		poseData[targetName].Pos = Vector3.new(-s.Pos.X, s.Pos.Y, s.Pos.Z)
 		poseData[targetName].Rot = Vector3.new(s.Rot.X, -s.Rot.Y, -s.Rot.Z)
-		refreshSliders()
+		refreshReadout()
 	end
 end)
 
 -- 🔄 RESET ALL TOOL
 createBottomBtn("🔄 RESET", 0.35, 0.3, COLOR_DARK, function()
+	pushHistory()
 	initPoseData()
-	refreshSliders()
+	refreshReadout()
 end)
 
 --------------------------------------------------------------------------------
--- 10. EXPORT POPUP & ONE-TAP CLIPBOARD SYSTEM
+-- 11. EXPORT POPUP & CLIPBOARD SYSTEM
 --------------------------------------------------------------------------------
 
 local exportWindow = Instance.new("Frame")
@@ -604,7 +789,6 @@ expBox.ClearTextOnFocus = false
 expBox.MultiLine = true
 expBox.ZIndex = 51
 expBox.Parent = exportWindow
-
 local expBoxCorner = Instance.new("UICorner")
 expBoxCorner.CornerRadius = UDim.new(0, 6)
 expBoxCorner.Parent = expBox
@@ -620,14 +804,11 @@ copyBtn.TextSize = 10
 copyBtn.TextColor3 = COLOR_BG
 copyBtn.ZIndex = 51
 copyBtn.Parent = exportWindow
-
 local copyCorner = Instance.new("UICorner")
 copyCorner.CornerRadius = UDim.new(0, 5)
 copyCorner.Parent = copyBtn
 
-expCloseBtn.Activated:Connect(function()
-	exportWindow.Visible = false
-end)
+expCloseBtn.Activated:Connect(function() exportWindow.Visible = false end)
 
 local function buildExportString()
 	local lines = {}
@@ -636,7 +817,6 @@ local function buildExportString()
 	table.insert(lines, "\tJoints = {")
 
 	for jointName, data in pairs(poseData) do
-		-- Only export joints that have non-zero modifications
 		if data.Pos.Magnitude > 0.001 or data.Rot.Magnitude > 0.001 then
 			table.insert(lines, string.format(
 				"\t\t[%q] = { Pos = Vector3.new(%.2f, %.2f, %.2f), Rot = Vector3.new(%d, %d, %d) },",
@@ -652,25 +832,19 @@ local function buildExportString()
 	return table.concat(lines, "\n")
 end
 
--- 📋 EXPORT BUTTON
 createBottomBtn("📋 EXPORT", 0.68, 0.3, COLOR_LIGHT_DARK, function()
-	local exportStr = buildExportString()
-	expBox.Text = exportStr
+	expBox.Text = buildExportString()
 	exportWindow.Visible = true
 end)
 
--- One-Tap Copy button with fallback
 copyBtn.Activated:Connect(function()
 	local exportStr = expBox.Text
-
-	-- Check for native clipboard support
 	local clipFunc = (setclipboard or toclipboard or (Clipboard and Clipboard.set))
 	if clipFunc then
 		pcall(function() clipFunc(exportStr) end)
 		copyBtn.Text = "✅ COPIED!"
 		task.delay(1.5, function() copyBtn.Text = "📋 COPY TO CLIPBOARD" end)
 	else
-		-- Tablet Fallback: Highlight text and capture focus for Android/HarmonyOS copy tooltip
 		expBox:CaptureFocus()
 		expBox.SelectionStart = 1
 		expBox.CursorPosition = #exportStr + 1
@@ -680,30 +854,40 @@ copyBtn.Activated:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- 11. ANIMATION FREEZING & REAL-TIME JOINT APPLICATION
+-- 12. RUNTIME UPDATES & ANIMATION FREEZING
 --------------------------------------------------------------------------------
 
--- Auto-detect rig on load
 local function detectRig()
 	local char = player.Character
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if hum and hum.RigType == Enum.HumanoidRigType.R6 then
-		currentRigType = "R6"
-		activeJointList = R6_JOINTS
-	else
+	if hum and hum.RigType == Enum.HumanoidRigType.R15 then
 		currentRigType = "R15"
 		activeJointList = R15_JOINTS
+	else
+		currentRigType = "R6"
+		activeJointList = R6_JOINTS
 	end
 	rigToggleBtn.Text = "RIG: " .. currentRigType
 	initPoseData()
 	buildLimbButtons()
-	refreshSliders()
+	refreshReadout()
 end
 
 detectRig()
 player.CharacterAdded:Connect(detectRig)
 
--- Runs every frame before physics to apply custom joint transforms and freeze animations
+-- Continuous Render Loop: Positions the 3D compass and syncs the real-time numeric readout
+RunService.RenderStepped:Connect(function()
+	local char = player.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if root then
+		-- Position compass directly at feet, oriented to the character's facing direction
+		compassPart.CFrame = CFrame.new(root.Position - Vector3.new(0, 2.8, 0)) * CFrame.Angles(0, math.rad(root.Orientation.Y), 0)
+	end
+	refreshReadout()
+end)
+
+-- Physics Pre-Step: Freezes default animations and applies custom joint transforms
 RunService.Stepped:Connect(function()
 	local char = player.Character
 	if not char then return end
@@ -711,14 +895,14 @@ RunService.Stepped:Connect(function()
 	local hum = char:FindFirstChildOfClass("Humanoid")
 	local animator = hum and hum:FindFirstChildOfClass("Animator")
 
-	-- Freeze active animation tracks so idle/breathing doesn't fight your pose
+	-- Freeze background walking/idle animations
 	if animator then
 		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
 			track:AdjustSpeed(0)
 		end
 	end
 
-	-- Apply custom transforms to each joint
+	-- Apply custom transforms to each Motor6D
 	for _, def in ipairs(activeJointList) do
 		local data = poseData[def.JointName]
 		if data then
@@ -734,4 +918,4 @@ RunService.Stepped:Connect(function()
 			end
 		end
 	end
-end)
+end) 
