@@ -55,6 +55,7 @@ local currentRigType = "R6"
 local activeJointList = R6_JOINTS
 local selectedLimbIndex = 1
 local poseData = {}
+local isEditorActive = true
 
 -- Undo/Redo Stacks
 local undoStack = {}
@@ -87,7 +88,7 @@ end
 initPoseData()
 
 --------------------------------------------------------------------------------
--- 3. FOOLPROOF 3D FRONT & BACK MARKERS
+-- 3. 3D FRONT & BACK MARKERS
 --------------------------------------------------------------------------------
 
 local function createMarker(name, color, labelText)
@@ -125,6 +126,13 @@ end
 local frontMarker = createMarker("MarkerFront", Color3.fromRGB(0, 245, 215), "▲ FRONT")
 local backMarker  = createMarker("MarkerBack",  Color3.fromRGB(240, 80, 80), "▼ BACK")
 
+local function setMarkersVisible(visible)
+	frontMarker.Transparency = visible and 0.2 or 1
+	backMarker.Transparency = visible and 0.2 or 1
+	frontMarker:FindFirstChildWhichIsA("BillboardGui").Enabled = visible
+	backMarker:FindFirstChildWhichIsA("BillboardGui").Enabled = visible
+end
+
 --------------------------------------------------------------------------------
 -- 4. SCREEN GUI & MAIN WINDOW
 --------------------------------------------------------------------------------
@@ -156,6 +164,29 @@ mainStroke.Thickness = 1.6
 mainStroke.Color = COLOR_ACCENT
 mainStroke.Parent = mainWindow
 
+-- Re-Open Floating Capsule (Shown when Editor is closed)
+local openPill = Instance.new("TextButton")
+openPill.Name = "OpenEditorPill"
+openPill.Size = UDim2.fromOffset(130, 36)
+openPill.Position = UDim2.new(0.85, -65, 0.65, 0)
+openPill.BackgroundColor3 = COLOR_BG
+openPill.BorderSizePixel = 0
+openPill.Font = Enum.Font.GothamBold
+openPill.Text = "🦴 POSE EDITOR"
+openPill.TextSize = 10
+openPill.TextColor3 = COLOR_ACCENT
+openPill.Visible = false
+openPill.Parent = screenGui
+
+local opCorner = Instance.new("UICorner")
+opCorner.CornerRadius = UDim.new(0, 18)
+opCorner.Parent = openPill
+
+local opStroke = Instance.new("UIStroke")
+opStroke.Thickness = 1.6
+opStroke.Color = COLOR_ACCENT
+opStroke.Parent = openPill
+
 -- Header Bar
 local header = Instance.new("Frame")
 header.Name = "Header"
@@ -168,19 +199,19 @@ hCorner.CornerRadius = UDim.new(0, 8)
 hCorner.Parent = header
 
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(0.4, 0, 1, 0)
+title.Size = UDim2.new(0.35, 0, 1, 0)
 title.Position = UDim2.new(0, 10, 0, 0)
 title.BackgroundTransparency = 1
 title.Font = Enum.Font.GothamBold
-title.Text = "🦴 INFINITE POSE METER"
+title.Text = "🦴 POSE EDITOR"
 title.TextSize = 9
 title.TextColor3 = COLOR_TEXT
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Parent = header
 
 local undoBtn = Instance.new("TextButton")
-undoBtn.Size = UDim2.fromOffset(26, 20)
-undoBtn.Position = UDim2.new(1, -140, 0.5, -10)
+undoBtn.Size = UDim2.fromOffset(24, 20)
+undoBtn.Position = UDim2.new(1, -165, 0.5, -10)
 undoBtn.BackgroundColor3 = COLOR_DARK
 undoBtn.BorderSizePixel = 0
 undoBtn.Font = Enum.Font.GothamBold
@@ -193,8 +224,8 @@ uCorner.CornerRadius = UDim.new(0, 4)
 uCorner.Parent = undoBtn
 
 local redoBtn = Instance.new("TextButton")
-redoBtn.Size = UDim2.fromOffset(26, 20)
-redoBtn.Position = UDim2.new(1, -110, 0.5, -10)
+redoBtn.Size = UDim2.fromOffset(24, 20)
+redoBtn.Position = UDim2.new(1, -137, 0.5, -10)
 redoBtn.BackgroundColor3 = COLOR_DARK
 redoBtn.BorderSizePixel = 0
 redoBtn.Font = Enum.Font.GothamBold
@@ -207,18 +238,33 @@ rCorner.CornerRadius = UDim.new(0, 4)
 rCorner.Parent = redoBtn
 
 local rigToggleBtn = Instance.new("TextButton")
-rigToggleBtn.Size = UDim2.fromOffset(72, 20)
-rigToggleBtn.Position = UDim2.new(1, -80, 0.5, -10)
+rigToggleBtn.Size = UDim2.fromOffset(68, 20)
+rigToggleBtn.Position = UDim2.new(1, -108, 0.5, -10)
 rigToggleBtn.BackgroundColor3 = COLOR_DARK
 rigToggleBtn.BorderSizePixel = 0
 rigToggleBtn.Font = Enum.Font.GothamBold
 rigToggleBtn.Text = "RIG: " .. currentRigType
-rigToggleBtn.TextSize = 9
+rigToggleBtn.TextSize = 8
 rigToggleBtn.TextColor3 = COLOR_ACCENT
 rigToggleBtn.Parent = header
 local rtCorner = Instance.new("UICorner")
 rtCorner.CornerRadius = UDim.new(0, 4)
 rtCorner.Parent = rigToggleBtn
+
+-- Exit / Restore Button [ ✕ ]
+local exitBtn = Instance.new("TextButton")
+exitBtn.Size = UDim2.fromOffset(26, 20)
+exitBtn.Position = UDim2.new(1, -34, 0.5, -10)
+exitBtn.BackgroundColor3 = Color3.fromRGB(55, 25, 30)
+exitBtn.BorderSizePixel = 0
+exitBtn.Font = Enum.Font.GothamBold
+exitBtn.Text = "✕"
+exitBtn.TextSize = 11
+exitBtn.TextColor3 = Color3.fromRGB(250, 90, 90)
+exitBtn.Parent = header
+local exCorner = Instance.new("UICorner")
+exCorner.CornerRadius = UDim.new(0, 4)
+exCorner.Parent = exitBtn
 
 -- Header Draggable Logic
 local dragging = false
@@ -252,7 +298,7 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 --------------------------------------------------------------------------------
--- 5. LEFT PANEL: LIMB LIST
+-- 5. LEFT PANEL: LIMB LIST & SUBTLE WHITE OUTLINE
 --------------------------------------------------------------------------------
 
 local limbScroll = Instance.new("ScrollingFrame")
@@ -272,18 +318,22 @@ local lsLayout = Instance.new("UIListLayout")
 lsLayout.Padding = UDim.new(0, 3)
 lsLayout.Parent = limbScroll
 
+-- White Outline Only (No Bright Fill)
 local limbHighlight = Instance.new("Highlight")
 limbHighlight.Name = "EditorLimbHighlight"
-limbHighlight.FillColor = COLOR_ACCENT
-limbHighlight.FillTransparency = 0.65
-limbHighlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-limbHighlight.OutlineTransparency = 0.2
+limbHighlight.FillTransparency = 1 -- ZERO FILL
+limbHighlight.OutlineColor = Color3.fromRGB(255, 255, 255) -- CRISP WHITE OUTLINE
+limbHighlight.OutlineTransparency = 0
 limbHighlight.Enabled = false
 
 local limbButtons = {}
 local refreshScrubberUI -- Forward declaration
 
 local function updateHighlight()
+	if not isEditorActive then
+		limbHighlight.Enabled = false
+		return
+	end
 	local char = player.Character
 	if not char then limbHighlight.Enabled = false; return end
 	local def = activeJointList[selectedLimbIndex]
@@ -337,7 +387,7 @@ local function buildLimbButtons()
 end
 
 --------------------------------------------------------------------------------
--- 6. RIGHT PANEL: INFINITE DRAG METER & CONTROLS
+-- 6. RIGHT PANEL: INFINITE DRAG METER
 --------------------------------------------------------------------------------
 
 local rightPanel = Instance.new("Frame")
@@ -361,7 +411,7 @@ local axisColors = {
 	Z = Color3.fromRGB(80, 170, 255),
 }
 
--- Mode Tabs: [ 🔄 ROTATION ] vs [ 📍 POSITION ]
+-- Mode Tabs
 local modeRow = Instance.new("Frame")
 modeRow.Size = UDim2.new(1, -12, 0, 24)
 modeRow.Position = UDim2.new(0, 6, 0, 6)
@@ -395,7 +445,7 @@ local ptc = Instance.new("UICorner")
 ptc.CornerRadius = UDim.new(0, 4)
 ptc.Parent = posTabBtn
 
--- Axis Selector: [ X ] [ Y ] [ Z ]
+-- Axis Selector
 local axisRow = Instance.new("Frame")
 axisRow.Size = UDim2.new(1, -12, 0, 22)
 axisRow.Position = UDim2.new(0, 6, 0, 34)
@@ -430,7 +480,7 @@ for i, axisName in ipairs({ "X", "Y", "Z" }) do
 	axisButtons[axisName] = abtn
 end
 
--- Real-Time Value Display
+-- Value Display
 local valueDisplay = Instance.new("TextLabel")
 valueDisplay.Size = UDim2.new(1, -12, 0, 22)
 valueDisplay.Position = UDim2.new(0, 6, 0, 60)
@@ -445,7 +495,7 @@ local vdc = Instance.new("UICorner")
 vdc.CornerRadius = UDim.new(0, 4)
 vdc.Parent = valueDisplay
 
--- INFINITE DRAG SCRUBBER (SWIPE LEFT/RIGHT FREELY)
+-- Infinite Drag Scrubber Frame
 local scrubBox = Instance.new("Frame")
 scrubBox.Name = "InfiniteScrubber"
 scrubBox.Size = UDim2.new(1, -12, 0, 44)
@@ -500,7 +550,7 @@ refreshScrubberUI = function()
 	scrubStroke.Color = axisColors[activeAxis]
 end
 
--- Infinite Drag Touch Handling
+-- Touch Dragging Handling
 local isScrubbing = false
 local lastTouchX = 0
 
@@ -531,7 +581,6 @@ UserInputService.InputChanged:Connect(function(input)
 		if not data then return end
 
 		if deckMode == "Rot" then
-			-- 1 pixel = 0.8 degrees of infinite rotation
 			local deltaDeg = deltaX * 0.8
 			local cur = data.Rot
 			if activeAxis == "X" then data.Rot = Vector3.new(cur.X + deltaDeg, cur.Y, cur.Z)
@@ -539,7 +588,6 @@ UserInputService.InputChanged:Connect(function(input)
 			elseif activeAxis == "Z" then data.Rot = Vector3.new(cur.X, cur.Y, cur.Z + deltaDeg)
 			end
 		else
-			-- 1 pixel = 0.015 studs of infinite translation
 			local deltaStuds = deltaX * 0.015
 			local cur = data.Pos
 			if activeAxis == "X" then data.Pos = Vector3.new(cur.X + deltaStuds, cur.Y, cur.Z)
@@ -552,7 +600,7 @@ UserInputService.InputChanged:Connect(function(input)
 	end
 end)
 
--- Micro-Nudge Stepper Buttons (Below the Scrubber)
+-- Micro-Nudge Buttons
 local nudgeRow = Instance.new("Frame")
 nudgeRow.Size = UDim2.new(1, -12, 0, 22)
 nudgeRow.Position = UDim2.new(0, 6, 0, 134)
@@ -658,7 +706,7 @@ posTabBtn.Activated:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- 7. UNDO & REDO HANDLERS
+-- 7. UNDO, REDO & EXIT/RESTORE HANDLERS
 --------------------------------------------------------------------------------
 
 undoBtn.Activated:Connect(function()
@@ -676,6 +724,48 @@ redoBtn.Activated:Connect(function()
 		refreshScrubberUI()
 	end
 end)
+
+-- FULL RESTORE / CANCEL POSE FUNCTION
+local function restoreCharacter()
+	isEditorActive = false
+	mainWindow.Visible = false
+	openPill.Visible = true
+	setMarkersVisible(false)
+	limbHighlight.Enabled = false
+
+	local char = player.Character
+	if not char then return end
+
+	-- 1. Unpause normal walking animations
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	local animator = hum and hum:FindFirstChildOfClass("Animator")
+	if animator then
+		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+			track:AdjustSpeed(1)
+		end
+	end
+
+	-- 2. Reset every joint transform back to identity
+	for _, def in ipairs(activeJointList) do
+		local parentPart = char:FindFirstChild(def.ParentPart)
+		local joint = parentPart and parentPart:FindFirstChild(def.JointName)
+		if joint and joint:IsA("Motor6D") then
+			joint.Transform = CFrame.identity
+		end
+	end
+end
+
+local function reopenEditor()
+	isEditorActive = true
+	mainWindow.Visible = true
+	openPill.Visible = false
+	setMarkersVisible(true)
+	updateHighlight()
+	refreshScrubberUI()
+end
+
+exitBtn.Activated:Connect(restoreCharacter)
+openPill.Activated:Connect(reopenEditor)
 
 --------------------------------------------------------------------------------
 -- 8. RIG TOGGLE LOGIC
@@ -879,7 +969,7 @@ copyBtn.Activated:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- 11. LIFECYCLE & RENDER LOOPS
+-- 11. LIFECYCLE & CONTINUOUS RENDER
 --------------------------------------------------------------------------------
 
 local function detectRig()
@@ -901,19 +991,21 @@ end
 task.spawn(detectRig)
 player.CharacterAdded:Connect(detectRig)
 
--- Continuous Render Loop: Positions the 3D FRONT & BACK markers relative to character facing
+-- Continuous Updates: Mathematical Front/Back Placement
 RunService.RenderStepped:Connect(function()
+	if not isEditorActive then return end
 	local char = player.Character
 	local root = char and char:FindFirstChild("HumanoidRootPart")
 	if root then
-		-- Mathematical alignment: -Z is ALWAYS Front (toes), +Z is ALWAYS Back (heels)
 		frontMarker.CFrame = root.CFrame * CFrame.new(0, -2.8, -3.8)
 		backMarker.CFrame  = root.CFrame * CFrame.new(0, -2.8,  3.8)
 	end
 end)
 
--- Physics Pre-Step: Freezes background animations and applies custom transforms
+-- Physics Pre-Step: Freezes background animations & applies transforms while editor is active
 RunService.Stepped:Connect(function()
+	if not isEditorActive then return end
+
 	local char = player.Character
 	if not char then return end
 
