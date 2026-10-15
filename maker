@@ -1,4 +1,4 @@
--- LocalScript inside StarterPlayerScripts
+-- LocalScript 2: PoseMaker inside StarterPlayerScripts
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -8,7 +8,7 @@ local TweenService = game:GetService("TweenService")
 local player = Players.LocalPlayer
 
 --------------------------------------------------------------------------------
--- 1. THEME & PALETTE
+-- 1. PALETTE & THEME
 --------------------------------------------------------------------------------
 
 local COLOR_BG = Color3.fromRGB(15, 17, 22)
@@ -17,28 +17,39 @@ local COLOR_DARK = Color3.fromRGB(26, 29, 38)
 local COLOR_LIGHT_DARK = Color3.fromRGB(36, 41, 54)
 local COLOR_ACTIVE = Color3.fromRGB(48, 56, 74)
 local COLOR_ACCENT = Color3.fromRGB(0, 245, 215)
+local COLOR_STAND = Color3.fromRGB(180, 120, 255)
 local COLOR_TEXT = Color3.fromRGB(240, 240, 240)
 local COLOR_MUTED = Color3.fromRGB(115, 120, 135)
 local COLOR_DANGER = Color3.fromRGB(240, 80, 80)
 
 --------------------------------------------------------------------------------
--- 2. STATE & PARSER
+-- 2. STATE & UNIFIED PARSER
 --------------------------------------------------------------------------------
 
-local playlist = {} -- Empty playlist by default
+local playlist = {} -- Empty by default
 
 local function toCFrame(pos, rot)
 	return CFrame.new(pos) * CFrame.fromEulerAnglesXYZ(math.rad(rot.X), math.rad(rot.Y), math.rad(rot.Z))
 end
 
-local function parsePastedTable(text)
-	local parsedJoints = {}
-	for jointName, px, py, pz, rx, ry, rz in text:gmatch('%["([^"]+)"%]%s*=%s*%{%s*Pos%s*=%s*Vector3%.new%(([%d%.%-]+)%s*,%s*([%d%.%-]+)%s*,%s*([%d%.%-]+)%)%s*,%s*Rot%s*=%s*Vector3%.new%(([%d%.%-]+)%s*,%s*([%d%.%-]+)%s*,%s*([%d%.%-]+)%)') do
-		local pos = Vector3.new(tonumber(px) or 0, tonumber(py) or 0, tonumber(pz) or 0)
-		local rot = Vector3.new(tonumber(rx) or 0, tonumber(ry) or 0, tonumber(rz) or 0)
-		parsedJoints[jointName] = toCFrame(pos, rot)
+-- Parses unified paired tables containing PlayerJoints, StandJoints, and Stance
+local function parseUnifiedTable(text)
+	local function extractJoints(block)
+		local joints = {}
+		for jointName, px, py, pz, rx, ry, rz in block:gmatch('%["([^"]+)"%]%s*=%s*%{%s*Pos%s*=%s*Vector3%.new%(([%d%.%-]+)%s*,%s*([%d%.%-]+)%s*,%s*([%d%.%-]+)%)%s*,%s*Rot%s*=%s*Vector3%.new%(([%d%.%-]+)%s*,%s*([%d%.%-]+)%s*,%s*([%d%.%-]+)%)') do
+			joints[jointName] = toCFrame(Vector3.new(tonumber(px) or 0, tonumber(py) or 0, tonumber(pz) or 0), Vector3.new(tonumber(rx) or 0, tonumber(ry) or 0, tonumber(rz) or 0))
+		end
+		return joints
 	end
-	return parsedJoints
+
+	local stance = text:match('Stance%s*=%s*"([^"]+)"') or "SHOULDER"
+	local playerBlock = text:match('PlayerJoints%s*=%s*%{([^%}]+)%}') or text
+	local standBlock = text:match('StandJoints%s*=%s*%{([^%}]+)%}')
+
+	local pJoints = extractJoints(playerBlock)
+	local sJoints = standBlock and extractJoints(standBlock) or {}
+
+	return pJoints, sJoints, stance
 end
 
 local isPlaying = false
@@ -51,18 +62,13 @@ local lastPoseIndex = 0
 local transitionStartTime = 0
 local lastSwitchTime = 0
 
-local startJointCFrames = {}
-local activeJointCFrames = {}
+local startPlayerCF = {}
+local activePlayerCF = {}
+local startStandCF = {}
+local activeStandCF = {}
 
-local currentRgb = Color3.fromRGB(0, 245, 215)
-local poseHighlight = nil
-
-RunService.RenderStepped:Connect(function()
-	currentRgb = Color3.fromHSV((os.clock() * 0.4) % 1, 0.85, 1)
-	if poseHighlight and poseHighlight.Parent then
-		poseHighlight.OutlineColor = currentRgb
-	end
-end)
+local standEntity = nil
+local lastGlyphTime = 0
 
 --------------------------------------------------------------------------------
 -- 3. SCREEN GUI & MAIN WINDOW
@@ -71,7 +77,7 @@ end)
 local playerGui = player:WaitForChild("PlayerGui")
 
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "PoseMakerSequencerGui"
+screenGui.Name = "DualPoseSequencerGui"
 screenGui.ResetOnSpawn = false
 screenGui.IgnoreGuiInset = true
 screenGui.DisplayOrder = 999
@@ -85,37 +91,102 @@ mainWindow.BackgroundColor3 = COLOR_BG
 mainWindow.BorderSizePixel = 0
 mainWindow.Active = true
 mainWindow.Parent = screenGui
-
 local mainCorner = Instance.new("UICorner")
 mainCorner.CornerRadius = UDim.new(0, 8)
 mainCorner.Parent = mainWindow
-
 local mainStroke = Instance.new("UIStroke")
 mainStroke.Thickness = 1.6
 mainStroke.Color = COLOR_ACCENT
 mainStroke.Parent = mainWindow
 
--- Floating Pill (Shown when Minimized)
-local minPill = Instance.new("TextButton")
-minPill.Name = "MinPill"
-minPill.Size = UDim2.fromOffset(130, 36)
-minPill.Position = UDim2.new(0.85, -65, 0.65, 0)
-minPill.BackgroundColor3 = COLOR_BG
-minPill.BorderSizePixel = 0
-minPill.Font = Enum.Font.GothamBold
-minPill.Text = "🌟 POSE MAKER"
-minPill.TextSize = 10
-minPill.TextColor3 = COLOR_ACCENT
-minPill.Visible = false
-minPill.Parent = screenGui
+-- Minimized Action Capsule (Starts at Y = 0.65 to prevent overlap with Editor)
+local minCapsule = Instance.new("Frame")
+minCapsule.Name = "MakerMinCapsule"
+minCapsule.Size = UDim2.fromOffset(180, 36)
+minCapsule.Position = UDim2.new(0.85, -90, 0.65, 0)
+minCapsule.BackgroundColor3 = COLOR_BG
+minCapsule.BorderSizePixel = 0
+minCapsule.Active = true
+minCapsule.Visible = false
+minCapsule.Parent = screenGui
+local mcCorner = Instance.new("UICorner")
+mcCorner.CornerRadius = UDim.new(0, 18)
+mcCorner.Parent = minCapsule
+local mcStroke = Instance.new("UIStroke")
+mcStroke.Thickness = 1.6
+mcStroke.Color = COLOR_ACCENT
+mcStroke.Parent = minCapsule
 
-local mpCorner = Instance.new("UICorner")
-mpCorner.CornerRadius = UDim.new(0, 18)
-mpCorner.Parent = minPill
-local mpStroke = Instance.new("UIStroke")
-mpStroke.Thickness = 1.6
-mpStroke.Color = COLOR_ACCENT
-mpStroke.Parent = minPill
+local minPlayBtn = Instance.new("TextButton")
+minPlayBtn.Size = UDim2.fromOffset(28, 28)
+minPlayBtn.Position = UDim2.new(0, 4, 0.5, -14)
+minPlayBtn.BackgroundColor3 = COLOR_LIGHT_DARK
+minPlayBtn.BorderSizePixel = 0
+minPlayBtn.Font = Enum.Font.GothamBold
+minPlayBtn.Text = "▶"
+minPlayBtn.TextSize = 12
+minPlayBtn.TextColor3 = COLOR_ACCENT
+minPlayBtn.Parent = minCapsule
+local mpbc = Instance.new("UICorner")
+mpbc.CornerRadius = UDim.new(0, 14)
+mpbc.Parent = minPlayBtn
+
+local minStatusText = Instance.new("TextLabel")
+minStatusText.Size = UDim2.new(1, -66, 1, 0)
+minStatusText.Position = UDim2.new(0, 36, 0, 0)
+minStatusText.BackgroundTransparency = 1
+minStatusText.Font = Enum.Font.GothamBold
+minStatusText.Text = "MAKER: OFF"
+minStatusText.TextSize = 9
+minStatusText.TextColor3 = COLOR_MUTED
+minStatusText.TextXAlignment = Enum.TextXAlignment.Left
+minStatusText.Parent = minCapsule
+
+local minExpandBtn = Instance.new("TextButton")
+minExpandBtn.Size = UDim2.fromOffset(24, 24)
+minExpandBtn.Position = UDim2.new(1, -28, 0.5, -12)
+minExpandBtn.BackgroundColor3 = COLOR_DARK
+minExpandBtn.BorderSizePixel = 0
+minExpandBtn.Font = Enum.Font.GothamBold
+minExpandBtn.Text = "⛶"
+minExpandBtn.TextSize = 10
+minExpandBtn.TextColor3 = COLOR_TEXT
+minExpandBtn.Parent = minCapsule
+local mebc = Instance.new("UICorner")
+mebc.CornerRadius = UDim.new(0, 4)
+mebc.Parent = minExpandBtn
+
+-- Dragging for Minimized Capsule
+local function makeCapsuleDraggable(frame)
+	local dragging = false
+	local dragStart = Vector2.zero
+	local startPos = UDim2.new()
+
+	frame.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = true
+			dragStart = input.Position
+			startPos = frame.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then dragging = false end
+			end)
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+			local delta = input.Position - dragStart
+			frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		end
+	end)
+end
+
+makeCapsuleDraggable(minCapsule)
+
+minExpandBtn.Activated:Connect(function()
+	mainWindow.Visible = true
+	minCapsule.Visible = false
+end)
 
 -- Header
 local header = Instance.new("Frame")
@@ -133,7 +204,7 @@ title.Size = UDim2.new(0.4, 0, 1, 0)
 title.Position = UDim2.new(0, 10, 0, 0)
 title.BackgroundTransparency = 1
 title.Font = Enum.Font.GothamBold
-title.Text = "🌟 POSE MAKER"
+title.Text = "🌟 DUAL-POSE SEQUENCER"
 title.TextSize = 9
 title.TextColor3 = COLOR_TEXT
 title.TextXAlignment = Enum.TextXAlignment.Left
@@ -167,42 +238,36 @@ local mbCorner = Instance.new("UICorner")
 mbCorner.CornerRadius = UDim.new(0, 4)
 mbCorner.Parent = minBtn
 
--- Header Draggable Logic
-local dragging = false
-local dragStart = Vector2.zero
-local startPos = UDim2.new()
+minBtn.Activated:Connect(function()
+	mainWindow.Visible = false
+	minCapsule.Visible = true
+end)
+
+-- Header Dragging
+local hDragging = false
+local hDragStart = Vector2.zero
+local hStartPos = UDim2.new()
 
 header.InputBegan:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-		dragging = true
-		dragStart = input.Position
-		startPos = mainWindow.Position
-
+		hDragging = true
+		hDragStart = input.Position
+		hStartPos = mainWindow.Position
 		input.Changed:Connect(function()
-			if input.UserInputState == Enum.UserInputState.End then dragging = false end
+			if input.UserInputState == Enum.UserInputState.End then hDragging = false end
 		end)
 	end
 end)
 
 UserInputService.InputChanged:Connect(function(input)
-	if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
-		local delta = input.Position - dragStart
-		mainWindow.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+	if hDragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+		local delta = input.Position - hDragStart
+		mainWindow.Position = UDim2.new(hStartPos.X.Scale, hStartPos.X.Offset + delta.X, hStartPos.Y.Scale, hStartPos.Y.Offset + delta.Y)
 	end
 end)
 
-minBtn.Activated:Connect(function()
-	mainWindow.Visible = false
-	minPill.Visible = true
-end)
-
-minPill.Activated:Connect(function()
-	mainWindow.Visible = true
-	minPill.Visible = false
-end)
-
 --------------------------------------------------------------------------------
--- 4. LEFT PANEL: PLAYLIST SLOTS
+-- 4. LEFT PANEL: PLAYLIST SLOTS (REORDER & REMOVE)
 --------------------------------------------------------------------------------
 
 local leftPanel = Instance.new("Frame")
@@ -253,13 +318,13 @@ refreshPlaylistUI = function()
 		emptyNotice.Size = UDim2.new(1, 0, 0, 40)
 		emptyNotice.BackgroundTransparency = 1
 		emptyNotice.Font = Enum.Font.GothamBold
-		emptyNotice.Text = "NO POSES LOADED\nTAP '+ PASTE POSE' BELOW"
+		emptyNotice.Text = "PLAYLIST EMPTY\nTAP '+ PASTE POSE' BELOW"
 		emptyNotice.TextSize = 8
 		emptyNotice.TextColor3 = COLOR_MUTED
 		emptyNotice.Parent = slotScroll
 		table.insert(slotFrames, emptyNotice)
 	else
-		for idx, pose in ipairs(playlist) do
+		for idx, item in ipairs(playlist) do
 			local card = Instance.new("Frame")
 			card.Size = UDim2.new(1, -4, 0, 26)
 			card.BackgroundColor3 = (isPlaying and idx == currentPoseIndex) and COLOR_ACTIVE or COLOR_BG
@@ -274,13 +339,13 @@ refreshPlaylistUI = function()
 			nameLabel.Position = UDim2.new(0, 6, 0, 0)
 			nameLabel.BackgroundTransparency = 1
 			nameLabel.Font = Enum.Font.GothamBold
-			nameLabel.Text = string.format("%d. %s", idx, pose.Name)
+			nameLabel.Text = string.format("%d. %s", idx, item.Name)
 			nameLabel.TextSize = 8
 			nameLabel.TextColor3 = (isPlaying and idx == currentPoseIndex) and COLOR_ACCENT or COLOR_TEXT
 			nameLabel.TextXAlignment = Enum.TextXAlignment.Left
 			nameLabel.Parent = card
 
-			-- Move Up [ ▲ ]
+			-- Reorder Up [ ▲ ]
 			local upBtn = Instance.new("TextButton")
 			upBtn.Size = UDim2.fromOffset(18, 18)
 			upBtn.Position = UDim2.new(1, -66, 0.5, -9)
@@ -297,13 +362,13 @@ refreshPlaylistUI = function()
 
 			upBtn.Activated:Connect(function()
 				if idx > 1 then
-					local item = table.remove(playlist, idx)
-					table.insert(playlist, idx - 1, item)
+					local moveItem = table.remove(playlist, idx)
+					table.insert(playlist, idx - 1, moveItem)
 					refreshPlaylistUI()
 				end
 			end)
 
-			-- Move Down [ ▼ ]
+			-- Reorder Down [ ▼ ]
 			local downBtn = Instance.new("TextButton")
 			downBtn.Size = UDim2.fromOffset(18, 18)
 			downBtn.Position = UDim2.new(1, -44, 0.5, -9)
@@ -320,13 +385,13 @@ refreshPlaylistUI = function()
 
 			downBtn.Activated:Connect(function()
 				if idx < #playlist then
-					local item = table.remove(playlist, idx)
-					table.insert(playlist, idx + 1, item)
+					local moveItem = table.remove(playlist, idx)
+					table.insert(playlist, idx + 1, moveItem)
 					refreshPlaylistUI()
 				end
 			end)
 
-			-- Remove [ 🗑 ]
+			-- Delete [ 🗑 ]
 			local delBtn = Instance.new("TextButton")
 			delBtn.Size = UDim2.fromOffset(18, 18)
 			delBtn.Position = UDim2.new(1, -22, 0.5, -9)
@@ -352,11 +417,9 @@ refreshPlaylistUI = function()
 			table.insert(slotFrames, card)
 		end
 	end
-
 	slotScroll.CanvasSize = UDim2.new(0, 0, 0, math.max(#playlist, 1) * 28 + 4)
 end
 
--- Bottom Slot Buttons: [ + PASTE POSE ] & [ CLEAR ]
 local pasteBtn = Instance.new("TextButton")
 pasteBtn.Size = UDim2.new(0.65, -4, 0, 22)
 pasteBtn.Position = UDim2.new(0, 3, 1, -25)
@@ -394,7 +457,7 @@ clearBtn.Activated:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- 5. RIGHT PANEL: MODE SELECTOR & SPEED TIMER
+-- 5. RIGHT PANEL: MODES & SPEED TIMER
 --------------------------------------------------------------------------------
 
 local rightPanel = Instance.new("Frame")
@@ -408,20 +471,9 @@ local rpc = Instance.new("UICorner")
 rpc.CornerRadius = UDim.new(0, 6)
 rpc.Parent = rightPanel
 
-local modeTitle = Instance.new("TextLabel")
-modeTitle.Size = UDim2.new(1, -8, 0, 16)
-modeTitle.Position = UDim2.new(0, 6, 0, 4)
-modeTitle.BackgroundTransparency = 1
-modeTitle.Font = Enum.Font.GothamBold
-modeTitle.Text = "PLAYBACK MODE"
-modeTitle.TextSize = 8
-modeTitle.TextColor3 = COLOR_MUTED
-modeTitle.TextXAlignment = Enum.TextXAlignment.Left
-modeTitle.Parent = rightPanel
-
 local auraFarmBtn = Instance.new("TextButton")
 auraFarmBtn.Size = UDim2.new(1, -12, 0, 24)
-auraFarmBtn.Position = UDim2.new(0, 6, 0, 22)
+auraFarmBtn.Position = UDim2.new(0, 6, 0, 16)
 auraFarmBtn.BackgroundColor3 = COLOR_BG
 auraFarmBtn.BorderSizePixel = 0
 auraFarmBtn.Font = Enum.Font.GothamBold
@@ -435,7 +487,7 @@ afc.Parent = auraFarmBtn
 
 local cycleBtn = Instance.new("TextButton")
 cycleBtn.Size = UDim2.new(1, -12, 0, 24)
-cycleBtn.Position = UDim2.new(0, 6, 0, 50)
+cycleBtn.Position = UDim2.new(0, 6, 0, 44)
 cycleBtn.BackgroundColor3 = COLOR_BG
 cycleBtn.BorderSizePixel = 0
 cycleBtn.Font = Enum.Font.GothamBold
@@ -449,11 +501,11 @@ cyc.Parent = cycleBtn
 
 local shuffleBtn = Instance.new("TextButton")
 shuffleBtn.Size = UDim2.new(1, -12, 0, 24)
-shuffleBtn.Position = UDim2.new(0, 6, 0, 78)
+shuffleBtn.Position = UDim2.new(0, 6, 0, 72)
 shuffleBtn.BackgroundColor3 = COLOR_BG
 shuffleBtn.BorderSizePixel = 0
 shuffleBtn.Font = Enum.Font.GothamBold
-shuffleBtn.Text = "🔀 SHUFFLE (RANDOM)"
+shuffleBtn.Text = "🔀 SHUFFLE (NO REPEAT)"
 shuffleBtn.TextSize = 8
 shuffleBtn.TextColor3 = COLOR_MUTED
 shuffleBtn.Parent = rightPanel
@@ -461,21 +513,10 @@ local shc = Instance.new("UICorner")
 shc.CornerRadius = UDim.new(0, 4)
 shc.Parent = shuffleBtn
 
--- Speed Controller
-local speedTitle = Instance.new("TextLabel")
-speedTitle.Size = UDim2.new(1, -8, 0, 16)
-speedTitle.Position = UDim2.new(0, 6, 0, 108)
-speedTitle.BackgroundTransparency = 1
-speedTitle.Font = Enum.Font.GothamBold
-speedTitle.Text = "SWITCH INTERVAL"
-speedTitle.TextSize = 8
-speedTitle.TextColor3 = COLOR_MUTED
-speedTitle.TextXAlignment = Enum.TextXAlignment.Left
-speedTitle.Parent = rightPanel
-
+-- Timer
 local timerRow = Instance.new("Frame")
 timerRow.Size = UDim2.new(1, -12, 0, 24)
-timerRow.Position = UDim2.new(0, 6, 0, 126)
+timerRow.Position = UDim2.new(0, 6, 0, 115)
 timerRow.BackgroundTransparency = 1
 timerRow.Parent = rightPanel
 
@@ -530,7 +571,6 @@ plusBtn.Activated:Connect(function()
 	timerDisplay.Text = string.format("%.2fs", switchInterval)
 end)
 
--- Live Status Monitor
 local liveStatusBox = Instance.new("TextLabel")
 liveStatusBox.Size = UDim2.new(1, -12, 0, 36)
 liveStatusBox.Position = UDim2.new(0, 6, 1, -42)
@@ -547,70 +587,44 @@ lsc.Parent = liveStatusBox
 
 refreshModeButtons = function()
 	local count = #playlist
-
 	if count == 0 then
 		playBtn.TextColor3 = COLOR_MUTED
 		playBtn.BackgroundColor3 = COLOR_BG
 		playbackMode = "Cycle"
-
-		auraFarmBtn.BackgroundColor3 = COLOR_BG
-		auraFarmBtn.TextColor3 = COLOR_MUTED
-		cycleBtn.BackgroundColor3 = COLOR_BG
-		cycleBtn.TextColor3 = COLOR_MUTED
-		shuffleBtn.BackgroundColor3 = COLOR_BG
-		shuffleBtn.TextColor3 = COLOR_MUTED
+		auraFarmBtn.BackgroundColor3 = COLOR_BG; auraFarmBtn.TextColor3 = COLOR_MUTED
+		cycleBtn.BackgroundColor3 = COLOR_BG; cycleBtn.TextColor3 = COLOR_MUTED
+		shuffleBtn.BackgroundColor3 = COLOR_BG; shuffleBtn.TextColor3 = COLOR_MUTED
 	elseif count == 1 then
 		playBtn.TextColor3 = COLOR_ACCENT
 		playBtn.BackgroundColor3 = COLOR_LIGHT_DARK
 		playbackMode = "AuraFarm"
-
-		auraFarmBtn.BackgroundColor3 = COLOR_ACTIVE
-		auraFarmBtn.TextColor3 = COLOR_ACCENT
-
-		cycleBtn.BackgroundColor3 = COLOR_BG
-		cycleBtn.TextColor3 = Color3.fromRGB(60, 65, 75) -- Dimmed disabled
-		shuffleBtn.BackgroundColor3 = COLOR_BG
-		shuffleBtn.TextColor3 = Color3.fromRGB(60, 65, 75) -- Dimmed disabled
+		auraFarmBtn.BackgroundColor3 = COLOR_ACTIVE; auraFarmBtn.TextColor3 = COLOR_ACCENT
+		cycleBtn.BackgroundColor3 = COLOR_BG; cycleBtn.TextColor3 = Color3.fromRGB(60, 65, 75)
+		shuffleBtn.BackgroundColor3 = COLOR_BG; shuffleBtn.TextColor3 = Color3.fromRGB(60, 65, 75)
 	else
 		playBtn.TextColor3 = COLOR_ACCENT
 		playBtn.BackgroundColor3 = COLOR_LIGHT_DARK
-
 		if playbackMode == "AuraFarm" then playbackMode = "Cycle" end
-
-		auraFarmBtn.BackgroundColor3 = COLOR_BG
-		auraFarmBtn.TextColor3 = COLOR_MUTED
-
+		auraFarmBtn.BackgroundColor3 = COLOR_BG; auraFarmBtn.TextColor3 = COLOR_MUTED
 		cycleBtn.BackgroundColor3 = (playbackMode == "Cycle") and COLOR_ACTIVE or COLOR_BG
 		cycleBtn.TextColor3 = (playbackMode == "Cycle") and COLOR_ACCENT or COLOR_MUTED
-
 		shuffleBtn.BackgroundColor3 = (playbackMode == "Shuffle") and COLOR_ACTIVE or COLOR_BG
 		shuffleBtn.TextColor3 = (playbackMode == "Shuffle") and COLOR_ACCENT or COLOR_MUTED
 	end
 end
 
 auraFarmBtn.Activated:Connect(function()
-	if #playlist == 1 then
-		playbackMode = "AuraFarm"
-		refreshModeButtons()
-	end
+	if #playlist == 1 then playbackMode = "AuraFarm"; refreshModeButtons() end
 end)
-
 cycleBtn.Activated:Connect(function()
-	if #playlist >= 2 then
-		playbackMode = "Cycle"
-		refreshModeButtons()
-	end
+	if #playlist >= 2 then playbackMode = "Cycle"; refreshModeButtons() end
 end)
-
 shuffleBtn.Activated:Connect(function()
-	if #playlist >= 2 then
-		playbackMode = "Shuffle"
-		refreshModeButtons()
-	end
+	if #playlist >= 2 then playbackMode = "Shuffle"; refreshModeButtons() end
 end)
 
 --------------------------------------------------------------------------------
--- 6. PASTE POSE POPUP MODAL
+-- 6. PASTE MODAL (UNIFIED TABLE INGESTION)
 --------------------------------------------------------------------------------
 
 local pasteModal = Instance.new("Frame")
@@ -630,36 +644,9 @@ pms.Thickness = 1.6
 pms.Color = COLOR_ACCENT
 pms.Parent = pasteModal
 
-local pmTitle = Instance.new("TextLabel")
-pmTitle.Size = UDim2.new(1, -50, 0, 24)
-pmTitle.Position = UDim2.new(0, 10, 0, 4)
-pmTitle.BackgroundTransparency = 1
-pmTitle.Font = Enum.Font.GothamBold
-pmTitle.Text = "📋 PASTE POSE CODE"
-pmTitle.TextSize = 10
-pmTitle.TextColor3 = COLOR_TEXT
-pmTitle.TextXAlignment = Enum.TextXAlignment.Left
-pmTitle.ZIndex = 51
-pmTitle.Parent = pasteModal
-
-local pmClose = Instance.new("TextButton")
-pmClose.Size = UDim2.fromOffset(20, 20)
-pmClose.Position = UDim2.new(1, -26, 0, 6)
-pmClose.BackgroundColor3 = COLOR_DARK
-pmClose.BorderSizePixel = 0
-pmClose.Font = Enum.Font.GothamBold
-pmClose.Text = "X"
-pmClose.TextSize = 10
-pmClose.TextColor3 = COLOR_DANGER
-pmClose.ZIndex = 51
-pmClose.Parent = pasteModal
-local pmcc = Instance.new("UICorner")
-pmcc.CornerRadius = UDim.new(0, 4)
-pmcc.Parent = pmClose
-
 local nameBox = Instance.new("TextBox")
 nameBox.Size = UDim2.new(1, -20, 0, 24)
-nameBox.Position = UDim2.new(0, 10, 0, 32)
+nameBox.Position = UDim2.new(0, 10, 0, 26)
 nameBox.BackgroundColor3 = COLOR_DARK
 nameBox.BorderSizePixel = 0
 nameBox.Font = Enum.Font.GothamBold
@@ -674,12 +661,12 @@ nbc.CornerRadius = UDim.new(0, 4)
 nbc.Parent = nameBox
 
 local codeBox = Instance.new("TextBox")
-codeBox.Size = UDim2.new(1, -20, 1, -94)
-codeBox.Position = UDim2.new(0, 10, 0, 60)
+codeBox.Size = UDim2.new(1, -20, 1, -90)
+codeBox.Position = UDim2.new(0, 10, 0, 54)
 codeBox.BackgroundColor3 = COLOR_DARK
 codeBox.BorderSizePixel = 0
 codeBox.Font = Enum.Font.Code
-codeBox.PlaceholderText = "PASTE EXPORTED TABLE TEXT HERE..."
+codeBox.PlaceholderText = "PASTE UNIFIED EXPORTED CODE HERE..."
 codeBox.Text = ""
 codeBox.TextSize = 8
 codeBox.TextColor3 = COLOR_TEXT
@@ -689,9 +676,9 @@ codeBox.ClearTextOnFocus = false
 codeBox.MultiLine = true
 codeBox.ZIndex = 51
 codeBox.Parent = pasteModal
-local cbc2 = Instance.new("UICorner")
-cbc2.CornerRadius = UDim.new(0, 4)
-cbc2.Parent = codeBox
+local cbc = Instance.new("UICorner")
+cbc.CornerRadius = UDim.new(0, 6)
+cbc.Parent = codeBox
 
 local confirmPasteBtn = Instance.new("TextButton")
 confirmPasteBtn.Size = UDim2.new(1, -20, 0, 24)
@@ -699,7 +686,7 @@ confirmPasteBtn.Position = UDim2.new(0, 10, 1, -28)
 confirmPasteBtn.BackgroundColor3 = COLOR_ACCENT
 confirmPasteBtn.BorderSizePixel = 0
 confirmPasteBtn.Font = Enum.Font.GothamBold
-confirmPasteBtn.Text = "ADD TO PLAYLIST"
+confirmPasteBtn.Text = "LOAD INTO PLAYLIST"
 confirmPasteBtn.TextSize = 9
 confirmPasteBtn.TextColor3 = COLOR_BG
 confirmPasteBtn.ZIndex = 51
@@ -709,66 +696,111 @@ cpbc.CornerRadius = UDim.new(0, 4)
 cpbc.Parent = confirmPasteBtn
 
 pasteBtn.Activated:Connect(function()
-	if #playlist >= 6 then
-		liveStatusBox.Text = "PLAYLIST FULL (MAX 6)"
-		liveStatusBox.TextColor3 = COLOR_DANGER
-		return
-	end
+	if #playlist >= 6 then return end
 	codeBox.Text = ""
 	nameBox.Text = "POSE " .. (#playlist + 1)
 	pasteModal.Visible = true
 end)
 
-pmClose.Activated:Connect(function() pasteModal.Visible = false end)
-
 confirmPasteBtn.Activated:Connect(function()
-	local rawText = codeBox.Text
-	local joints = parsePastedTable(rawText)
+	local pJoints, sJoints, stance = parseUnifiedTable(codeBox.Text)
+	local pCount = 0
+	for _ in pairs(pJoints) do pCount = pCount + 1 end
 
-	local jointCount = 0
-	for _ in pairs(joints) do jointCount = jointCount + 1 end
-
-	if jointCount > 0 then
+	if pCount > 0 then
 		local poseName = (#nameBox.Text > 0) and nameBox.Text:upper() or ("POSE " .. (#playlist + 1))
 		table.insert(playlist, {
 			Name = poseName,
-			Joints = joints
+			PlayerJoints = pJoints,
+			StandJoints = sJoints, -- If empty, fallback logic will mirror player automatically
+			Stance = stance
 		})
 		pasteModal.Visible = false
 		refreshPlaylistUI()
 		refreshModeButtons()
-		liveStatusBox.Text = "ADDED: " .. poseName
-		liveStatusBox.TextColor3 = COLOR_ACCENT
+		liveStatusBox.Text = "LOADED: " .. poseName
 	else
 		confirmPasteBtn.Text = "ERROR: NO JOINTS FOUND!"
-		task.delay(1.5, function() confirmPasteBtn.Text = "ADD TO PLAYLIST" end)
+		task.delay(1.5, function() confirmPasteBtn.Text = "LOAD INTO PLAYLIST" end)
 	end
 end)
 
 --------------------------------------------------------------------------------
--- 7. PLAYBACK ENGINE & PROCEDURAL IDLE
+-- 7. STAND SUMMON & "ゴゴゴ" MENACING GLYPHS FX
 --------------------------------------------------------------------------------
 
-local function flashAura(char)
-	if not poseHighlight then
-		poseHighlight = Instance.new("Highlight")
-		poseHighlight.Name = "PoseSequencerAura"
-		poseHighlight.FillColor = currentRgb
-		poseHighlight.FillTransparency = 0.35
-		poseHighlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-		poseHighlight.OutlineTransparency = 0
-		poseHighlight.Parent = char
+local function spawnGlyph(position)
+	local part = Instance.new("Part")
+	part.Size = Vector3.new(0.05, 0.05, 0.05)
+	part.CFrame = CFrame.new(position + Vector3.new(math.random(-25, 25) / 10, math.random(-5, 10) / 10, math.random(-25, 25) / 10))
+	part.Transparency = 1
+	part.CanCollide = false
+	part.Anchored = true
+	part.Parent = workspace
+
+	local bb = Instance.new("BillboardGui")
+	bb.Size = UDim2.fromOffset(32, 32)
+	bb.AlwaysOnTop = true
+	bb.Parent = part
+
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.fromScale(1, 1)
+	lbl.BackgroundTransparency = 1
+	lbl.Font = Enum.Font.GothamBold
+	lbl.Text = "ゴ"
+	lbl.TextSize = 24
+	lbl.TextColor3 = Color3.fromRGB(160, 40, 240) -- Deep menacing purple
+	lbl.Parent = bb
+
+	local tween = TweenService:Create(
+		part,
+		TweenInfo.new(1.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ CFrame = part.CFrame * CFrame.new(0, 3.5, 0) }
+	)
+	local fadeTween = TweenService:Create(
+		lbl,
+		TweenInfo.new(1.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ TextTransparency = 1, TextSize = 14 }
+	)
+
+	tween:Play()
+	fadeTween:Play()
+	tween.Completed:Connect(function() part:Destroy() end)
+end
+
+local function spawnStandEntity()
+	if standEntity then standEntity:Destroy() standEntity = nil end
+	local char = player.Character
+	if not char then return end
+
+	char.Archivable = true
+	local stand = char:Clone()
+	char.Archivable = false
+	stand.Name = "GhostStandEntity"
+
+	for _, p in ipairs(stand:GetDescendants()) do
+		if p:IsA("BasePart") then
+			p.CanCollide = false
+			p.Anchored = true
+			p.Material = Enum.Material.ForceField
+			p.Color = COLOR_STAND
+			p.Transparency = 0.35
+		elseif p:IsA("Script") or p:IsA("LocalScript") or p:IsA("Sound") then
+			p:Destroy()
+		end
 	end
 
-	poseHighlight.FillColor = currentRgb
-	poseHighlight.FillTransparency = (playbackMode == "AuraFarm") and 0.45 or 0.25
-	local tween = TweenService:Create(
-		poseHighlight,
-		TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-		{ FillTransparency = 0.85 }
-	)
-	tween:Play()
+	stand.Parent = workspace
+	standEntity = stand
 end
+
+local function removeStandEntity()
+	if standEntity then standEntity:Destroy() standEntity = nil end
+end
+
+--------------------------------------------------------------------------------
+-- 8. PLAYBACK CONTROLLER & GROUNDED BREATHING ENGINE
+--------------------------------------------------------------------------------
 
 local function startPlayback()
 	if #playlist == 0 then return end
@@ -781,29 +813,27 @@ local function startPlayback()
 	playBtn.Text = "⏹ STOP"
 	playBtn.BackgroundColor3 = Color3.fromRGB(60, 20, 25)
 	playBtn.TextColor3 = COLOR_DANGER
+	minPlayBtn.Text = "⏹"
+	minPlayBtn.TextColor3 = COLOR_DANGER
 
 	local char = player.Character
 	local root = char and char:FindFirstChild("HumanoidRootPart")
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
 	local torso = char and char:FindFirstChild("Torso")
 
-	-- Snapshot current joints as ease-in base
 	if torso then
-		for jointName, _ in pairs(playlist[1].Joints) do
+		for jointName, _ in pairs(playlist[1].PlayerJoints) do
 			local joint = torso:FindFirstChild(jointName) or (root and root:FindFirstChild(jointName))
-			startJointCFrames[jointName] = (joint and joint.Transform) or CFrame.identity
-			activeJointCFrames[jointName] = startJointCFrames[jointName]
+			startPlayerCF[jointName] = (joint and joint.Transform) or CFrame.identity
+			activePlayerCF[jointName] = startPlayerCF[jointName]
 		end
 	end
 
-	-- Freeze In Place
+	-- Freeze Player in place firmly
 	if root then root.Anchored = true end
-	if hum then
-		hum.WalkSpeed = 0
-		hum.JumpPower = 0
-	end
+	if hum then hum.WalkSpeed = 0; hum.JumpPower = 0 end
 
-	flashAura(char)
+	spawnStandEntity()
 	refreshPlaylistUI()
 end
 
@@ -812,8 +842,11 @@ stopPlayback = function()
 	playBtn.Text = "▶ PLAY"
 	playBtn.BackgroundColor3 = COLOR_LIGHT_DARK
 	playBtn.TextColor3 = COLOR_ACCENT
+	minPlayBtn.Text = "▶"
+	minPlayBtn.TextColor3 = COLOR_ACCENT
 	liveStatusBox.Text = "STATUS: STOPPED"
-	liveStatusBox.TextColor3 = COLOR_MUTED
+	minStatusText.Text = "MAKER: OFF"
+	minStatusText.TextColor3 = COLOR_MUTED
 
 	local char = player.Character
 	local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -822,124 +855,134 @@ stopPlayback = function()
 
 	-- Unfreeze & restore movement
 	if root then root.Anchored = false end
-	if hum then
-		hum.WalkSpeed = 16
-		hum.JumpPower = 50
-	end
+	if hum then hum.WalkSpeed = 16; hum.JumpPower = 50 end
 
-	-- Unpause animations
 	local animator = hum and hum:FindFirstChildOfClass("Animator")
 	if animator then
-		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-			track:AdjustSpeed(1)
-		end
+		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do track:AdjustSpeed(1) end
 	end
 
-	-- Reset joint transforms back to neutral
+	-- Reset player joints to clean neutral
 	if torso then
 		for _, name in ipairs({ "Neck", "RootJoint", "Right Shoulder", "Left Shoulder", "Right Hip", "Left Hip" }) do
 			local joint = torso:FindFirstChild(name) or (root and root:FindFirstChild(name))
-			if joint and joint:IsA("Motor6D") then
-				joint.Transform = CFrame.identity
-			end
+			if joint and joint:IsA("Motor6D") then joint.Transform = CFrame.identity end
 		end
 	end
 
-	if poseHighlight then
-		poseHighlight:Destroy()
-		poseHighlight = nil
-	end
-
+	removeStandEntity()
 	refreshPlaylistUI()
 end
 
 playBtn.Activated:Connect(function()
-	if isPlaying then
-		stopPlayback()
-	else
-		startPlayback()
-	end
+	if isPlaying then stopPlayback() else startPlayback() end
 end)
 
--- Physics Pre-Step: Slerp Interpolation & Procedural Living Breath
+minPlayBtn.Activated:Connect(function()
+	if isPlaying then stopPlayback() else startPlayback() end
+end)
+
+-- Physics Pre-Step: Synchronized Dual Interpolation & Grounded Breathing
 RunService.Stepped:Connect(function()
 	local char = player.Character
 	if not char or not isPlaying or #playlist == 0 then return end
 
-	local hum = char:FindFirstChildOfClass("Humanoid")
 	local root = char:FindFirstChild("HumanoidRootPart")
 	local torso = char:FindFirstChild("Torso")
+	local hum = char:FindFirstChildOfClass("Humanoid")
 	local animator = hum and hum:FindFirstChildOfClass("Animator")
 
-	-- Freeze active animations so they don't fight custom poses
 	if animator then
-		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-			track:AdjustSpeed(0)
-		end
+		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do track:AdjustSpeed(0) end
 	end
 
 	local now = os.clock()
 
-	-- Timer / Cycle Logic
+	-- Menacing Glyphs
+	if now - lastGlyphTime >= 0.35 and root then
+		lastGlyphTime = now
+		spawnGlyph(root.Position)
+	end
+
+	-- Mode Timing & Sequencing
 	if playbackMode ~= "AuraFarm" and #playlist >= 2 then
 		if now - lastSwitchTime >= switchInterval then
 			lastSwitchTime = now
 			transitionStartTime = now
 
-			-- Snapshot current transforms as the start for the next ease
-			for jointName, cf in pairs(activeJointCFrames) do
-				startJointCFrames[jointName] = cf
-			end
+			for jointName, cf in pairs(activePlayerCF) do startPlayerCF[jointName] = cf end
+			for jointName, cf in pairs(activeStandCF) do startStandCF[jointName] = cf end
 
 			if playbackMode == "Cycle" then
 				currentPoseIndex = (currentPoseIndex % #playlist) + 1
 			elseif playbackMode == "Shuffle" then
-				-- Smart non-repeating shuffle
 				local nextIdx = currentPoseIndex
-				repeat
-					nextIdx = math.random(1, #playlist)
-				until nextIdx ~= lastPoseIndex
+				repeat nextIdx = math.random(1, #playlist) until nextIdx ~= lastPoseIndex
 				currentPoseIndex = nextIdx
 				lastPoseIndex = nextIdx
 			end
-
-			flashAura(char)
 			refreshPlaylistUI()
 		end
 	end
 
-	-- Update Status Box
-	local activePose = playlist[currentPoseIndex]
-	if activePose then
-		if playbackMode == "AuraFarm" then
-			liveStatusBox.Text = string.format("FARMING: %s", activePose.Name)
-			liveStatusBox.TextColor3 = currentRgb
-		else
-			liveStatusBox.Text = string.format("PLAYING [%d/%d]: %s", currentPoseIndex, #playlist, activePose.Name)
-			liveStatusBox.TextColor3 = COLOR_ACCENT
+	local item = playlist[currentPoseIndex]
+	if not item then return end
+
+	liveStatusBox.Text = string.format("[%d/%d] %s", currentPoseIndex, #playlist, item.Name)
+	minStatusText.Text = string.format("%d/%d: %s", currentPoseIndex, #playlist, item.Name)
+	minStatusText.TextColor3 = COLOR_ACCENT
+
+	local elapsed = now - transitionStartTime
+	local rawAlpha = math.clamp(elapsed / TRANSITION_TIME, 0, 1)
+	local smoothAlpha = rawAlpha * rawAlpha * (3 - 2 * rawAlpha)
+
+	-- Grounded Breathing: ONLY modulates shoulders & neck (hips/feet are 100% frozen)
+	local chestBreath = math.sin(now * 2.2) * 0.02
+	local neckDrift = math.sin(now * 1.5) * 0.015
+
+	-- 1. Apply to Human Avatar
+	for jointName, targetCF in pairs(item.PlayerJoints) do
+		local joint = (torso and torso:FindFirstChild(jointName)) or (root and root:FindFirstChild(jointName))
+		if joint and joint:IsA("Motor6D") then
+			local startCF = startPlayerCF[jointName] or targetCF
+			local blendedCF = startCF:Lerp(targetCF, smoothAlpha)
+			activePlayerCF[jointName] = blendedCF
+
+			if jointName == "Neck" then
+				joint.Transform = blendedCF * CFrame.Angles(neckDrift, 0, 0)
+			elseif jointName == "Right Shoulder" or jointName == "Left Shoulder" then
+				joint.Transform = blendedCF * CFrame.new(0, chestBreath, 0)
+			else
+				joint.Transform = blendedCF
+			end
+		end
+	end
+
+	-- 2. Apply to Stand Entity
+	if standEntity and root then
+		local sRoot = standEntity:FindFirstChild("HumanoidRootPart")
+		local sTorso = standEntity:FindFirstChild("Torso")
+
+		-- Position Stand by Stance
+		if sRoot then
+			local offset = (item.Stance == "EMBRACE") and CFrame.new(0, 0.1, 0.65) or CFrame.new(2.5, 1.5, 2.5)
+			sRoot.CFrame = root.CFrame * offset
 		end
 
-		-- Slerp Transition Math
-		local elapsed = now - transitionStartTime
-		local rawAlpha = math.clamp(elapsed / TRANSITION_TIME, 0, 1)
-		local smoothAlpha = rawAlpha * rawAlpha * (3 - 2 * rawAlpha)
+		-- Fallback Rule: If StandJoints has no entries, mirror player's pose 1:1
+		local standSource = (next(item.StandJoints) ~= nil) and item.StandJoints or item.PlayerJoints
 
-		-- Procedural Living Idle Wave (Subtle Breathing & Head Drift)
-		local breatheY = math.sin(now * 2.2) * 0.03
-		local headTilt = math.sin(now * 1.6) * 0.015
-
-		for jointName, targetCF in pairs(activePose.Joints) do
-			local joint = (torso and torso:FindFirstChild(jointName)) or (root and root:FindFirstChild(jointName))
+		for jointName, targetCF in pairs(standSource) do
+			local joint = (sTorso and sTorso:FindFirstChild(jointName)) or (sRoot and sRoot:FindFirstChild(jointName))
 			if joint and joint:IsA("Motor6D") then
-				local startCF = startJointCFrames[jointName] or targetCF
+				local startCF = startStandCF[jointName] or targetCF
 				local blendedCF = startCF:Lerp(targetCF, smoothAlpha)
-				activeJointCFrames[jointName] = blendedCF
+				activeStandCF[jointName] = blendedCF
 
-				-- Layer procedural breathing on top
 				if jointName == "Neck" then
-					joint.Transform = blendedCF * CFrame.Angles(headTilt, 0, 0)
-				elseif jointName == "RootJoint" then
-					joint.Transform = blendedCF * CFrame.new(0, breatheY, 0)
+					joint.Transform = blendedCF * CFrame.Angles(neckDrift, 0, 0)
+				elseif jointName == "Right Shoulder" or jointName == "Left Shoulder" then
+					joint.Transform = blendedCF * CFrame.new(0, chestBreath, 0)
 				else
 					joint.Transform = blendedCF
 				end
@@ -948,6 +991,5 @@ RunService.Stepped:Connect(function()
 	end
 end)
 
--- Initialize UI
 refreshPlaylistUI()
-refreshModeButtons()
+refreshModeButtons() 
