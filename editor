@@ -1,4 +1,4 @@
--- LocalScript inside StarterPlayerScripts
+-- LocalScript 1: PoseEditor inside StarterPlayerScripts
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -21,7 +21,7 @@ local COLOR_TEXT = Color3.fromRGB(240, 240, 240)
 local COLOR_MUTED = Color3.fromRGB(115, 120, 135)
 
 --------------------------------------------------------------------------------
--- 2. RIG DEFINITIONS
+-- 2. RIG DEFINITIONS & DUAL MEMORY
 --------------------------------------------------------------------------------
 
 local R6_JOINTS = {
@@ -54,33 +54,38 @@ local R15_JOINTS = {
 local currentRigType = "R6"
 local activeJointList = R6_JOINTS
 local selectedLimbIndex = 1
-local poseData = {}
 local isEditorActive = true
 
--- Undo/Redo Stacks
+-- Dual Memory Banks (Never wipes when switching modes)
+local humanPoseData = {}
+local standPoseData = {}
+
+local currentEditTarget = "Human" -- "Human" or "Stand"
+local standStance = "SHOULDER"    -- "SHOULDER" or "EMBRACE"
+local referenceDummy = nil
+
 local undoStack = {}
 local redoStack = {}
 
-local function clonePoseData(src)
+local function cloneBank(src)
 	local copy = {}
-	for k, v in pairs(src) do
-		copy[k] = { Pos = v.Pos, Rot = v.Rot }
-	end
+	for k, v in pairs(src) do copy[k] = { Pos = v.Pos, Rot = v.Rot } end
 	return copy
 end
 
 local function pushHistory()
-	table.insert(undoStack, clonePoseData(poseData))
-	if #undoStack > 25 then
-		table.remove(undoStack, 1)
-	end
+	local activeBank = (currentEditTarget == "Human") and humanPoseData or standPoseData
+	table.insert(undoStack, { Target = currentEditTarget, Data = cloneBank(activeBank) })
+	if #undoStack > 25 then table.remove(undoStack, 1) end
 	redoStack = {}
 end
 
 local function initPoseData()
-	poseData = {}
+	humanPoseData = {}
+	standPoseData = {}
 	for _, def in ipairs(activeJointList) do
-		poseData[def.JointName] = { Pos = Vector3.zero, Rot = Vector3.zero }
+		humanPoseData[def.JointName] = { Pos = Vector3.zero, Rot = Vector3.zero }
+		standPoseData[def.JointName] = { Pos = Vector3.zero, Rot = Vector3.zero }
 	end
 	undoStack = {}
 	redoStack = {}
@@ -134,7 +139,57 @@ local function setMarkersVisible(visible)
 end
 
 --------------------------------------------------------------------------------
--- 4. SCREEN GUI & MAIN WINDOW
+-- 4. REFERENCE DUMMY SYSTEM (ANTI-CLIP)
+--------------------------------------------------------------------------------
+
+local function spawnReferenceDummy()
+	if referenceDummy then referenceDummy:Destroy() referenceDummy = nil end
+
+	local char = player.Character
+	if not char then return end
+
+	char.Archivable = true
+	local dummy = char:Clone()
+	char.Archivable = false
+	dummy.Name = "HumanPoseReferenceDummy"
+
+	for _, p in ipairs(dummy:GetDescendants()) do
+		if p:IsA("BasePart") then
+			p.CanCollide = false
+			p.Anchored = true
+			p.Material = Enum.Material.ForceField
+			p.Color = Color3.fromRGB(180, 180, 195)
+			p.Transparency = 0.35
+		elseif p:IsA("Script") or p:IsA("LocalScript") or p:IsA("Sound") then
+			p:Destroy()
+		end
+	end
+
+	-- Apply the exact human pose onto the reference dummy
+	for _, def in ipairs(activeJointList) do
+		local data = humanPoseData[def.JointName]
+		if data then
+			local parentPart = dummy:FindFirstChild(def.ParentPart)
+			local joint = parentPart and parentPart:FindFirstChild(def.JointName)
+			if joint and joint:IsA("Motor6D") then
+				joint.Transform = CFrame.new(data.Pos) * CFrame.fromEulerAnglesXYZ(math.rad(data.Rot.X), math.rad(data.Rot.Y), math.rad(data.Rot.Z))
+			end
+		end
+	end
+
+	dummy.Parent = workspace
+	referenceDummy = dummy
+end
+
+local function removeReferenceDummy()
+	if referenceDummy then
+		referenceDummy:Destroy()
+		referenceDummy = nil
+	end
+end
+
+--------------------------------------------------------------------------------
+-- 5. SCREEN GUI & MAIN WINDOW
 --------------------------------------------------------------------------------
 
 local playerGui = player:WaitForChild("PlayerGui")
@@ -149,7 +204,7 @@ screenGui.Parent = playerGui
 local mainWindow = Instance.new("Frame")
 mainWindow.Name = "PoseEditorWindow"
 mainWindow.Size = UDim2.fromOffset(360, 290)
-mainWindow.Position = UDim2.new(0.5, -180, 0.58, -145)
+mainWindow.Position = UDim2.new(0.5, -180, 0.55, -145)
 mainWindow.BackgroundColor3 = COLOR_BG
 mainWindow.BorderSizePixel = 0
 mainWindow.Active = true
@@ -164,28 +219,73 @@ mainStroke.Thickness = 1.6
 mainStroke.Color = COLOR_ACCENT
 mainStroke.Parent = mainWindow
 
--- Re-Open Floating Capsule (Shown when Editor is closed)
-local openPill = Instance.new("TextButton")
-openPill.Name = "OpenEditorPill"
-openPill.Size = UDim2.fromOffset(130, 36)
-openPill.Position = UDim2.new(0.85, -65, 0.65, 0)
-openPill.BackgroundColor3 = COLOR_BG
-openPill.BorderSizePixel = 0
-openPill.Font = Enum.Font.GothamBold
-openPill.Text = "🦴 POSE EDITOR"
-openPill.TextSize = 10
-openPill.TextColor3 = COLOR_ACCENT
-openPill.Visible = false
-openPill.Parent = screenGui
+-- Minimized Pill (Starts at Y = 0.52 to prevent overlap)
+local minPill = Instance.new("Frame")
+minPill.Name = "EditorMinPill"
+minPill.Size = UDim2.fromOffset(130, 36)
+minPill.Position = UDim2.new(0.85, -65, 0.52, 0)
+minPill.BackgroundColor3 = COLOR_BG
+minPill.BorderSizePixel = 0
+minPill.Active = true
+minPill.Visible = false
+minPill.Parent = screenGui
 
-local opCorner = Instance.new("UICorner")
-opCorner.CornerRadius = UDim.new(0, 18)
-opCorner.Parent = openPill
+local mpCorner = Instance.new("UICorner")
+mpCorner.CornerRadius = UDim.new(0, 18)
+mpCorner.Parent = minPill
+local mpStroke = Instance.new("UIStroke")
+mpStroke.Thickness = 1.6
+mpStroke.Color = COLOR_ACCENT
+mpStroke.Parent = minPill
 
-local opStroke = Instance.new("UIStroke")
-opStroke.Thickness = 1.6
-opStroke.Color = COLOR_ACCENT
-opStroke.Parent = openPill
+local pillBtn = Instance.new("TextButton")
+pillBtn.Size = UDim2.fromScale(1, 1)
+pillBtn.BackgroundTransparency = 1
+pillBtn.Font = Enum.Font.GothamBold
+pillBtn.Text = "🦴 POSE EDITOR"
+pillBtn.TextSize = 10
+pillBtn.TextColor3 = COLOR_ACCENT
+pillBtn.Parent = minPill
+
+-- Drag logic for the minimized pill
+local function makePillDraggable(pillFrame)
+	local dragging = false
+	local dragStart = Vector2.zero
+	local startPos = UDim2.new()
+	local moved = 0
+
+	pillFrame.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = true
+			dragStart = input.Position
+			startPos = pillFrame.Position
+			moved = 0
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then dragging = false end
+			end)
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+			local delta = input.Position - dragStart
+			moved = delta.Magnitude
+			pillFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		end
+	end)
+
+	return function() return moved < 8 end
+end
+
+local isCleanTap = makePillDraggable(minPill)
+pillBtn.Activated:Connect(function()
+	if isCleanTap() then
+		mainWindow.Visible = true
+		minPill.Visible = false
+		isEditorActive = true
+		setMarkersVisible(true)
+	end
+end)
 
 -- Header Bar
 local header = Instance.new("Frame")
@@ -198,20 +298,63 @@ local hCorner = Instance.new("UICorner")
 hCorner.CornerRadius = UDim.new(0, 8)
 hCorner.Parent = header
 
-local title = Instance.new("TextLabel")
-title.Size = UDim2.new(0.35, 0, 1, 0)
-title.Position = UDim2.new(0, 10, 0, 0)
-title.BackgroundTransparency = 1
-title.Font = Enum.Font.GothamBold
-title.Text = "🦴 POSE EDITOR"
-title.TextSize = 9
-title.TextColor3 = COLOR_TEXT
-title.TextXAlignment = Enum.TextXAlignment.Left
-title.Parent = header
+-- Header Dragging
+local hDragging = false
+local hDragStart = Vector2.zero
+local hStartPos = UDim2.new()
+
+header.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+		hDragging = true
+		hDragStart = input.Position
+		hStartPos = mainWindow.Position
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then hDragging = false end
+		end)
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if hDragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+		local delta = input.Position - hDragStart
+		mainWindow.Position = UDim2.new(hStartPos.X.Scale, hStartPos.X.Offset + delta.X, hStartPos.Y.Scale, hStartPos.Y.Offset + delta.Y)
+	end
+end)
+
+-- Mode Switcher [ 👤 HUMAN ] vs [ 🦾 STAND ]
+local targetSwitchBtn = Instance.new("TextButton")
+targetSwitchBtn.Size = UDim2.fromOffset(80, 22)
+targetSwitchBtn.Position = UDim2.new(0, 8, 0.5, -11)
+targetSwitchBtn.BackgroundColor3 = COLOR_ACTIVE
+targetSwitchBtn.BorderSizePixel = 0
+targetSwitchBtn.Font = Enum.Font.GothamBold
+targetSwitchBtn.Text = "👤 HUMAN"
+targetSwitchBtn.TextSize = 9
+targetSwitchBtn.TextColor3 = COLOR_ACCENT
+targetSwitchBtn.Parent = header
+local tsc = Instance.new("UICorner")
+tsc.CornerRadius = UDim.new(0, 4)
+tsc.Parent = targetSwitchBtn
+
+-- Stand Stance Selector [ 👑 SHOULDER ] / [ 🫂 EMBRACE ]
+local stanceBtn = Instance.new("TextButton")
+stanceBtn.Size = UDim2.fromOffset(82, 22)
+stanceBtn.Position = UDim2.new(0, 92, 0.5, -11)
+stanceBtn.BackgroundColor3 = COLOR_DARK
+stanceBtn.BorderSizePixel = 0
+stanceBtn.Font = Enum.Font.GothamBold
+stanceBtn.Text = "👑 SHOULDER"
+stanceBtn.TextSize = 8
+stanceBtn.TextColor3 = COLOR_MUTED
+stanceBtn.Visible = false
+stanceBtn.Parent = header
+local stc = Instance.new("UICorner")
+stc.CornerRadius = UDim.new(0, 4)
+stc.Parent = stanceBtn
 
 local undoBtn = Instance.new("TextButton")
 undoBtn.Size = UDim2.fromOffset(24, 20)
-undoBtn.Position = UDim2.new(1, -165, 0.5, -10)
+undoBtn.Position = UDim2.new(1, -115, 0.5, -10)
 undoBtn.BackgroundColor3 = COLOR_DARK
 undoBtn.BorderSizePixel = 0
 undoBtn.Font = Enum.Font.GothamBold
@@ -225,7 +368,7 @@ uCorner.Parent = undoBtn
 
 local redoBtn = Instance.new("TextButton")
 redoBtn.Size = UDim2.fromOffset(24, 20)
-redoBtn.Position = UDim2.new(1, -137, 0.5, -10)
+redoBtn.Position = UDim2.new(1, -87, 0.5, -10)
 redoBtn.BackgroundColor3 = COLOR_DARK
 redoBtn.BorderSizePixel = 0
 redoBtn.Font = Enum.Font.GothamBold
@@ -237,24 +380,23 @@ local rCorner = Instance.new("UICorner")
 rCorner.CornerRadius = UDim.new(0, 4)
 rCorner.Parent = redoBtn
 
-local rigToggleBtn = Instance.new("TextButton")
-rigToggleBtn.Size = UDim2.fromOffset(68, 20)
-rigToggleBtn.Position = UDim2.new(1, -108, 0.5, -10)
-rigToggleBtn.BackgroundColor3 = COLOR_DARK
-rigToggleBtn.BorderSizePixel = 0
-rigToggleBtn.Font = Enum.Font.GothamBold
-rigToggleBtn.Text = "RIG: " .. currentRigType
-rigToggleBtn.TextSize = 8
-rigToggleBtn.TextColor3 = COLOR_ACCENT
-rigToggleBtn.Parent = header
-local rtCorner = Instance.new("UICorner")
-rtCorner.CornerRadius = UDim.new(0, 4)
-rtCorner.Parent = rigToggleBtn
+local minBtn = Instance.new("TextButton")
+minBtn.Size = UDim2.fromOffset(24, 20)
+minBtn.Position = UDim2.new(1, -59, 0.5, -10)
+minBtn.BackgroundColor3 = COLOR_DARK
+minBtn.BorderSizePixel = 0
+minBtn.Font = Enum.Font.GothamBold
+minBtn.Text = "-"
+minBtn.TextSize = 12
+minBtn.TextColor3 = COLOR_TEXT
+minBtn.Parent = header
+local mbc = Instance.new("UICorner")
+mbc.CornerRadius = UDim.new(0, 4)
+mbc.Parent = minBtn
 
--- Exit / Restore Button [ ✕ ]
 local exitBtn = Instance.new("TextButton")
 exitBtn.Size = UDim2.fromOffset(26, 20)
-exitBtn.Position = UDim2.new(1, -34, 0.5, -10)
+exitBtn.Position = UDim2.new(1, -32, 0.5, -10)
 exitBtn.BackgroundColor3 = Color3.fromRGB(55, 25, 30)
 exitBtn.BorderSizePixel = 0
 exitBtn.Font = Enum.Font.GothamBold
@@ -266,39 +408,8 @@ local exCorner = Instance.new("UICorner")
 exCorner.CornerRadius = UDim.new(0, 4)
 exCorner.Parent = exitBtn
 
--- Header Draggable Logic
-local dragging = false
-local dragStart = Vector2.zero
-local startPos = UDim2.new()
-
-header.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-		dragging = true
-		dragStart = input.Position
-		startPos = mainWindow.Position
-
-		input.Changed:Connect(function()
-			if input.UserInputState == Enum.UserInputState.End then
-				dragging = false
-			end
-		end)
-	end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-	if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
-		local delta = input.Position - dragStart
-		mainWindow.Position = UDim2.new(
-			startPos.X.Scale,
-			startPos.X.Offset + delta.X,
-			startPos.Y.Scale,
-			startPos.Y.Offset + delta.Y
-		)
-	end
-end)
-
 --------------------------------------------------------------------------------
--- 5. LEFT PANEL: LIMB LIST & SUBTLE WHITE OUTLINE
+-- 6. LEFT PANEL: LIMB LIST & CRISP WHITE OUTLINE
 --------------------------------------------------------------------------------
 
 local limbScroll = Instance.new("ScrollingFrame")
@@ -309,7 +420,6 @@ limbScroll.BackgroundColor3 = COLOR_DARK
 limbScroll.BorderSizePixel = 0
 limbScroll.ScrollBarThickness = 3
 limbScroll.Parent = mainWindow
-
 local lsCorner = Instance.new("UICorner")
 lsCorner.CornerRadius = UDim.new(0, 6)
 lsCorner.Parent = limbScroll
@@ -318,11 +428,11 @@ local lsLayout = Instance.new("UIListLayout")
 lsLayout.Padding = UDim.new(0, 3)
 lsLayout.Parent = limbScroll
 
--- White Outline Only (No Bright Fill)
+-- Subtle White Outline (Fill Transparency = 1)
 local limbHighlight = Instance.new("Highlight")
 limbHighlight.Name = "EditorLimbHighlight"
-limbHighlight.FillTransparency = 1 -- ZERO FILL
-limbHighlight.OutlineColor = Color3.fromRGB(255, 255, 255) -- CRISP WHITE OUTLINE
+limbHighlight.FillTransparency = 1
+limbHighlight.OutlineColor = Color3.fromRGB(255, 255, 255)
 limbHighlight.OutlineTransparency = 0
 limbHighlight.Enabled = false
 
@@ -330,10 +440,7 @@ local limbButtons = {}
 local refreshScrubberUI -- Forward declaration
 
 local function updateHighlight()
-	if not isEditorActive then
-		limbHighlight.Enabled = false
-		return
-	end
+	if not isEditorActive then limbHighlight.Enabled = false; return end
 	local char = player.Character
 	if not char then limbHighlight.Enabled = false; return end
 	local def = activeJointList[selectedLimbIndex]
@@ -381,13 +488,12 @@ local function buildLimbButtons()
 
 		table.insert(limbButtons, btn)
 	end
-
 	limbScroll.CanvasSize = UDim2.new(0, 0, 0, #activeJointList * 25 + 6)
 	updateHighlight()
 end
 
 --------------------------------------------------------------------------------
--- 6. RIGHT PANEL: INFINITE DRAG METER
+-- 7. RIGHT PANEL: INFINITE DRAG METER & NUDGE BUTTONS
 --------------------------------------------------------------------------------
 
 local rightPanel = Instance.new("Frame")
@@ -397,21 +503,18 @@ rightPanel.Position = UDim2.new(0, 122, 0, 38)
 rightPanel.BackgroundColor3 = COLOR_DARK
 rightPanel.BorderSizePixel = 0
 rightPanel.Parent = mainWindow
-
 local rpCorner = Instance.new("UICorner")
 rpCorner.CornerRadius = UDim.new(0, 6)
 rpCorner.Parent = rightPanel
 
-local deckMode = "Rot"  -- "Rot" or "Pos"
-local activeAxis = "X" -- "X", "Y", or "Z"
-
+local deckMode = "Rot"
+local activeAxis = "X"
 local axisColors = {
 	X = Color3.fromRGB(245, 90, 90),
 	Y = Color3.fromRGB(90, 245, 140),
 	Z = Color3.fromRGB(80, 170, 255),
 }
 
--- Mode Tabs
 local modeRow = Instance.new("Frame")
 modeRow.Size = UDim2.new(1, -12, 0, 24)
 modeRow.Position = UDim2.new(0, 6, 0, 6)
@@ -445,7 +548,6 @@ local ptc = Instance.new("UICorner")
 ptc.CornerRadius = UDim.new(0, 4)
 ptc.Parent = posTabBtn
 
--- Axis Selector
 local axisRow = Instance.new("Frame")
 axisRow.Size = UDim2.new(1, -12, 0, 22)
 axisRow.Position = UDim2.new(0, 6, 0, 34)
@@ -476,11 +578,9 @@ for i, axisName in ipairs({ "X", "Y", "Z" }) do
 		end
 		if refreshScrubberUI then refreshScrubberUI() end
 	end)
-
 	axisButtons[axisName] = abtn
 end
 
--- Value Display
 local valueDisplay = Instance.new("TextLabel")
 valueDisplay.Size = UDim2.new(1, -12, 0, 22)
 valueDisplay.Position = UDim2.new(0, 6, 0, 60)
@@ -495,7 +595,7 @@ local vdc = Instance.new("UICorner")
 vdc.CornerRadius = UDim.new(0, 4)
 vdc.Parent = valueDisplay
 
--- Infinite Drag Scrubber Frame
+-- Infinite Scrubber Box
 local scrubBox = Instance.new("Frame")
 scrubBox.Name = "InfiniteScrubber"
 scrubBox.Size = UDim2.new(1, -12, 0, 44)
@@ -522,35 +622,25 @@ scrubLabel.TextSize = 8
 scrubLabel.TextColor3 = COLOR_MUTED
 scrubLabel.Parent = scrubBox
 
-local centerTick = Instance.new("Frame")
-centerTick.Size = UDim2.new(0, 2, 0.7, 0)
-centerTick.Position = UDim2.new(0.5, -1, 0.15, 0)
-centerTick.BackgroundColor3 = COLOR_ACCENT
-centerTick.BorderSizePixel = 0
-centerTick.Parent = scrubBox
-
 local function getActiveData()
 	local def = activeJointList[selectedLimbIndex]
 	if not def then return nil end
-	return poseData[def.JointName]
+	local bank = (currentEditTarget == "Human") and humanPoseData or standPoseData
+	return bank[def.JointName]
 end
 
 refreshScrubberUI = function()
 	local data = getActiveData()
 	if not data then return end
-
 	if deckMode == "Rot" then
-		local val = data.Rot[activeAxis]
-		valueDisplay.Text = string.format("%s ROTATION: %d°", activeAxis, math.floor(val))
+		valueDisplay.Text = string.format("%s ROT: %d°", activeAxis, math.floor(data.Rot[activeAxis]))
 	else
-		local val = data.Pos[activeAxis]
-		valueDisplay.Text = string.format("%s POSITION: %.2f", activeAxis, val)
+		valueDisplay.Text = string.format("%s POS: %.2f", activeAxis, data.Pos[activeAxis])
 	end
 	valueDisplay.TextColor3 = axisColors[activeAxis]
 	scrubStroke.Color = axisColors[activeAxis]
 end
 
--- Touch Dragging Handling
 local isScrubbing = false
 local lastTouchX = 0
 
@@ -576,7 +666,6 @@ UserInputService.InputChanged:Connect(function(input)
 	if isScrubbing and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
 		local deltaX = input.Position.X - lastTouchX
 		lastTouchX = input.Position.X
-
 		local data = getActiveData()
 		if not data then return end
 
@@ -585,17 +674,14 @@ UserInputService.InputChanged:Connect(function(input)
 			local cur = data.Rot
 			if activeAxis == "X" then data.Rot = Vector3.new(cur.X + deltaDeg, cur.Y, cur.Z)
 			elseif activeAxis == "Y" then data.Rot = Vector3.new(cur.X, cur.Y + deltaDeg, cur.Z)
-			elseif activeAxis == "Z" then data.Rot = Vector3.new(cur.X, cur.Y, cur.Z + deltaDeg)
-			end
+			elseif activeAxis == "Z" then data.Rot = Vector3.new(cur.X, cur.Y, cur.Z + deltaDeg) end
 		else
 			local deltaStuds = deltaX * 0.015
 			local cur = data.Pos
 			if activeAxis == "X" then data.Pos = Vector3.new(cur.X + deltaStuds, cur.Y, cur.Z)
 			elseif activeAxis == "Y" then data.Pos = Vector3.new(cur.X, cur.Y + deltaStuds, cur.Z)
-			elseif activeAxis == "Z" then data.Pos = Vector3.new(cur.X, cur.Y, cur.Z + deltaStuds)
-			end
+			elseif activeAxis == "Z" then data.Pos = Vector3.new(cur.X, cur.Y, cur.Z + deltaStuds) end
 		end
-
 		refreshScrubberUI()
 	end
 end)
@@ -629,26 +715,23 @@ local function applyStep(amount)
 	local data = getActiveData()
 	if not data then return end
 	pushHistory()
-
 	if deckMode == "Rot" then
 		local cur = data.Rot
 		if activeAxis == "X" then data.Rot = Vector3.new(cur.X + amount, cur.Y, cur.Z)
 		elseif activeAxis == "Y" then data.Rot = Vector3.new(cur.X, cur.Y + amount, cur.Z)
-		elseif activeAxis == "Z" then data.Rot = Vector3.new(cur.X, cur.Y, cur.Z + amount)
-		end
+		elseif activeAxis == "Z" then data.Rot = Vector3.new(cur.X, cur.Y, cur.Z + amount) end
 	else
 		local cur = data.Pos
 		if activeAxis == "X" then data.Pos = Vector3.new(cur.X + amount, cur.Y, cur.Z)
 		elseif activeAxis == "Y" then data.Pos = Vector3.new(cur.X, cur.Y + amount, cur.Z)
-		elseif activeAxis == "Z" then data.Pos = Vector3.new(cur.X, cur.Y, cur.Z + amount)
-		end
+		elseif activeAxis == "Z" then data.Pos = Vector3.new(cur.X, cur.Y, cur.Z + amount) end
 	end
 	refreshScrubberUI()
 end
 
-local n1 = createNudgeBtn("-5°",  0.00, 0.18, function() applyStep(deckMode == "Rot" and -5 or -0.1) end)
-local n2 = createNudgeBtn("-1°",  0.20, 0.18, function() applyStep(deckMode == "Rot" and -1 or -0.02) end)
-local n3 = createNudgeBtn("0",    0.41, 0.18, function()
+createNudgeBtn("-5°", 0.00, 0.18, function() applyStep(deckMode == "Rot" and -5 or -0.1) end)
+createNudgeBtn("-1°", 0.20, 0.18, function() applyStep(deckMode == "Rot" and -1 or -0.02) end)
+createNudgeBtn("0",   0.41, 0.18, function()
 	local data = getActiveData()
 	if not data then return end
 	pushHistory()
@@ -656,138 +739,134 @@ local n3 = createNudgeBtn("0",    0.41, 0.18, function()
 		local cur = data.Rot
 		if activeAxis == "X" then data.Rot = Vector3.new(0, cur.Y, cur.Z)
 		elseif activeAxis == "Y" then data.Rot = Vector3.new(cur.X, 0, cur.Z)
-		elseif activeAxis == "Z" then data.Rot = Vector3.new(cur.X, cur.Y, 0)
-		end
+		elseif activeAxis == "Z" then data.Rot = Vector3.new(cur.X, cur.Y, 0) end
 	else
 		local cur = data.Pos
 		if activeAxis == "X" then data.Pos = Vector3.new(0, cur.Y, cur.Z)
 		elseif activeAxis == "Y" then data.Pos = Vector3.new(cur.X, 0, cur.Z)
-		elseif activeAxis == "Z" then data.Pos = Vector3.new(cur.X, cur.Y, 0)
-		end
+		elseif activeAxis == "Z" then data.Pos = Vector3.new(cur.X, cur.Y, 0) end
 	end
 	refreshScrubberUI()
 end)
-local n4 = createNudgeBtn("+1°",  0.62, 0.18, function() applyStep(deckMode == "Rot" and 1 or 0.02) end)
-local n5 = createNudgeBtn("+5°",  0.82, 0.18, function() applyStep(deckMode == "Rot" and 5 or 0.1) end)
-
-local function updateTabDisplay()
-	if deckMode == "Rot" then
-		rotTabBtn.BackgroundColor3 = COLOR_ACTIVE
-		rotTabBtn.TextColor3 = COLOR_ACCENT
-		posTabBtn.BackgroundColor3 = COLOR_BG
-		posTabBtn.TextColor3 = COLOR_MUTED
-
-		n1.Text = "-5°"
-		n2.Text = "-1°"
-		n4.Text = "+1°"
-		n5.Text = "+5°"
-	else
-		posTabBtn.BackgroundColor3 = COLOR_ACTIVE
-		posTabBtn.TextColor3 = Color3.fromRGB(80, 170, 255)
-		rotTabBtn.BackgroundColor3 = COLOR_BG
-		rotTabBtn.TextColor3 = COLOR_MUTED
-
-		n1.Text = "-0.1"
-		n2.Text = "-0.02"
-		n4.Text = "+0.02"
-		n5.Text = "+0.1"
-	end
-	refreshScrubberUI()
-end
+createNudgeBtn("+1°", 0.62, 0.18, function() applyStep(deckMode == "Rot" and 1 or 0.02) end)
+createNudgeBtn("+5°", 0.82, 0.18, function() applyStep(deckMode == "Rot" and 5 or 0.1) end)
 
 rotTabBtn.Activated:Connect(function()
 	deckMode = "Rot"
-	updateTabDisplay()
+	rotTabBtn.BackgroundColor3 = COLOR_ACTIVE
+	rotTabBtn.TextColor3 = COLOR_ACCENT
+	posTabBtn.BackgroundColor3 = COLOR_BG
+	posTabBtn.TextColor3 = COLOR_MUTED
+	refreshScrubberUI()
 end)
 
 posTabBtn.Activated:Connect(function()
 	deckMode = "Pos"
-	updateTabDisplay()
+	posTabBtn.BackgroundColor3 = COLOR_ACTIVE
+	posTabBtn.TextColor3 = Color3.fromRGB(80, 170, 255)
+	rotTabBtn.BackgroundColor3 = COLOR_BG
+	rotTabBtn.TextColor3 = COLOR_MUTED
+	refreshScrubberUI()
 end)
 
 --------------------------------------------------------------------------------
--- 7. UNDO, REDO & EXIT/RESTORE HANDLERS
+-- 8. TARGET SWITCHER (HUMAN / STAND) & STANCE CONTROLLER
+--------------------------------------------------------------------------------
+
+targetSwitchBtn.Activated:Connect(function()
+	if currentEditTarget == "Human" then
+		currentEditTarget = "Stand"
+		targetSwitchBtn.Text = "🦾 STAND"
+		targetSwitchBtn.TextColor3 = Color3.fromRGB(180, 120, 255)
+		stanceBtn.Visible = true
+
+		-- Spawn the human reference dummy holding the custom human pose
+		spawnReferenceDummy()
+	else
+		currentEditTarget = "Human"
+		targetSwitchBtn.Text = "👤 HUMAN"
+		targetSwitchBtn.TextColor3 = COLOR_ACCENT
+		stanceBtn.Visible = false
+
+		-- Remove the dummy and return avatar to origin
+		removeReferenceDummy()
+	end
+	refreshScrubberUI()
+end)
+
+stanceBtn.Activated:Connect(function()
+	if standStance == "SHOULDER" then
+		standStance = "EMBRACE"
+		stanceBtn.Text = "🫂 EMBRACE"
+		stanceBtn.TextColor3 = Color3.fromRGB(255, 140, 200)
+	else
+		standStance = "SHOULDER"
+		stanceBtn.Text = "👑 SHOULDER"
+		stanceBtn.TextColor3 = COLOR_ACCENT
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- 9. UNDO, REDO & EXIT/RESTORE HANDLERS
 --------------------------------------------------------------------------------
 
 undoBtn.Activated:Connect(function()
 	if #undoStack > 0 then
-		table.insert(redoStack, clonePoseData(poseData))
-		poseData = table.remove(undoStack)
+		local last = table.remove(undoStack)
+		local activeBank = (last.Target == "Human") and humanPoseData or standPoseData
+		table.insert(redoStack, { Target = last.Target, Data = cloneBank(activeBank) })
+		if last.Target == "Human" then humanPoseData = last.Data else standPoseData = last.Data end
 		refreshScrubberUI()
 	end
 end)
 
 redoBtn.Activated:Connect(function()
 	if #redoStack > 0 then
-		table.insert(undoStack, clonePoseData(poseData))
-		poseData = table.remove(redoStack)
+		local nextState = table.remove(redoStack)
+		local activeBank = (nextState.Target == "Human") and humanPoseData or standPoseData
+		table.insert(undoStack, { Target = nextState.Target, Data = cloneBank(activeBank) })
+		if nextState.Target == "Human" then humanPoseData = nextState.Data else standPoseData = nextState.Data end
 		refreshScrubberUI()
 	end
 end)
 
--- FULL RESTORE / CANCEL POSE FUNCTION
-local function restoreCharacter()
-	isEditorActive = false
+minBtn.Activated:Connect(function()
 	mainWindow.Visible = false
-	openPill.Visible = true
+	minPill.Visible = true
+	isEditorActive = false
 	setMarkersVisible(false)
 	limbHighlight.Enabled = false
+	removeReferenceDummy()
+end)
+
+local function fullRestore()
+	mainWindow.Visible = false
+	minPill.Visible = true
+	isEditorActive = false
+	setMarkersVisible(false)
+	limbHighlight.Enabled = false
+	removeReferenceDummy()
 
 	local char = player.Character
 	if not char then return end
 
-	-- 1. Unpause normal walking animations
 	local hum = char:FindFirstChildOfClass("Humanoid")
 	local animator = hum and hum:FindFirstChildOfClass("Animator")
 	if animator then
-		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-			track:AdjustSpeed(1)
-		end
+		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do track:AdjustSpeed(1) end
 	end
 
-	-- 2. Reset every joint transform back to identity
 	for _, def in ipairs(activeJointList) do
 		local parentPart = char:FindFirstChild(def.ParentPart)
 		local joint = parentPart and parentPart:FindFirstChild(def.JointName)
-		if joint and joint:IsA("Motor6D") then
-			joint.Transform = CFrame.identity
-		end
+		if joint and joint:IsA("Motor6D") then joint.Transform = CFrame.identity end
 	end
 end
 
-local function reopenEditor()
-	isEditorActive = true
-	mainWindow.Visible = true
-	openPill.Visible = false
-	setMarkersVisible(true)
-	updateHighlight()
-	refreshScrubberUI()
-end
-
-exitBtn.Activated:Connect(restoreCharacter)
-openPill.Activated:Connect(reopenEditor)
+exitBtn.Activated:Connect(fullRestore)
 
 --------------------------------------------------------------------------------
--- 8. RIG TOGGLE LOGIC
---------------------------------------------------------------------------------
-
-rigToggleBtn.Activated:Connect(function()
-	if currentRigType == "R15" then
-		currentRigType = "R6"
-		activeJointList = R6_JOINTS
-	else
-		currentRigType = "R15"
-		activeJointList = R15_JOINTS
-	end
-	selectedLimbIndex = 1
-	rigToggleBtn.Text = "RIG: " .. currentRigType
-	initPoseData()
-	buildLimbButtons()
-	refreshScrubberUI()
-end)
-
---------------------------------------------------------------------------------
--- 9. BOTTOM TOOLBAR (MIRROR, RESET, EXPORT)
+-- 10. BOTTOM TOOLBAR & UNIFIED DUAL EXPORT
 --------------------------------------------------------------------------------
 
 local function createBottomBtn(text, posX, width, color, callback)
@@ -808,42 +887,34 @@ local function createBottomBtn(text, posX, width, color, callback)
 	return btn
 end
 
--- 🪞 MIRROR TOOL
 createBottomBtn("🪞 MIRROR", 0.02, 0.3, COLOR_LIGHT_DARK, function()
 	local def = activeJointList[selectedLimbIndex]
 	if not def then return end
-
 	local pairsMap = {
-		["Right Shoulder"] = "Left Shoulder",   ["Left Shoulder"] = "Right Shoulder",
-		["Right Hip"]      = "Left Hip",        ["Left Hip"]      = "Right Hip",
-		["RightShoulder"]  = "LeftShoulder",    ["LeftShoulder"]  = "RightShoulder",
-		["RightElbow"]     = "LeftElbow",       ["LeftElbow"]     = "RightElbow",
-		["RightWrist"]     = "LeftWrist",       ["LeftWrist"]     = "RightWrist",
-		["RightKnee"]      = "LeftKnee",        ["LeftKnee"]      = "RightKnee",
-		["RightAnkle"]     = "LeftAnkle",       ["LeftAnkle"]     = "RightAnkle",
+		["Right Shoulder"] = "Left Shoulder", ["Left Shoulder"] = "Right Shoulder",
+		["Right Hip"]      = "Left Hip",       ["Left Hip"]      = "Right Hip",
 	}
-
 	local targetName = pairsMap[def.JointName]
-	if targetName and poseData[def.JointName] and poseData[targetName] then
+	local bank = (currentEditTarget == "Human") and humanPoseData or standPoseData
+	if targetName and bank[def.JointName] and bank[targetName] then
 		pushHistory()
-		local s = poseData[def.JointName]
-		poseData[targetName].Pos = Vector3.new(-s.Pos.X, s.Pos.Y, s.Pos.Z)
-		poseData[targetName].Rot = Vector3.new(s.Rot.X, -s.Rot.Y, -s.Rot.Z)
+		local s = bank[def.JointName]
+		bank[targetName].Pos = Vector3.new(-s.Pos.X, s.Pos.Y, s.Pos.Z)
+		bank[targetName].Rot = Vector3.new(s.Rot.X, -s.Rot.Y, -s.Rot.Z)
 		refreshScrubberUI()
 	end
 end)
 
--- 🔄 RESET ALL TOOL
 createBottomBtn("🔄 RESET", 0.35, 0.3, COLOR_DARK, function()
 	pushHistory()
-	initPoseData()
+	local bank = (currentEditTarget == "Human") and humanPoseData or standPoseData
+	for _, def in ipairs(activeJointList) do
+		bank[def.JointName] = { Pos = Vector3.zero, Rot = Vector3.zero }
+	end
 	refreshScrubberUI()
 end)
 
---------------------------------------------------------------------------------
--- 10. EXPORT POPUP & CLIPBOARD SYSTEM
---------------------------------------------------------------------------------
-
+-- Unified Export Window
 local exportWindow = Instance.new("Frame")
 exportWindow.Name = "ExportWindow"
 exportWindow.Size = UDim2.fromOffset(340, 240)
@@ -853,11 +924,9 @@ exportWindow.BorderSizePixel = 0
 exportWindow.Visible = false
 exportWindow.ZIndex = 50
 exportWindow.Parent = screenGui
-
 local expCorner = Instance.new("UICorner")
 expCorner.CornerRadius = UDim.new(0, 8)
 expCorner.Parent = exportWindow
-
 local expStroke = Instance.new("UIStroke")
 expStroke.Thickness = 1.6
 expStroke.Color = COLOR_ACCENT
@@ -868,7 +937,7 @@ expTitle.Size = UDim2.new(1, -60, 0, 26)
 expTitle.Position = UDim2.new(0, 10, 0, 4)
 expTitle.BackgroundTransparency = 1
 expTitle.Font = Enum.Font.GothamBold
-expTitle.Text = "📋 EXPORTED POSE TABLE"
+expTitle.Text = "📋 UNIFIED PAIRED POSE TABLE"
 expTitle.TextSize = 10
 expTitle.TextColor3 = COLOR_TEXT
 expTitle.TextXAlignment = Enum.TextXAlignment.Left
@@ -889,6 +958,7 @@ expCloseBtn.Parent = exportWindow
 local ecc = Instance.new("UICorner")
 ecc.CornerRadius = UDim.new(0, 4)
 ecc.Parent = expCloseBtn
+expCloseBtn.Activated:Connect(function() exportWindow.Visible = false end)
 
 local expBox = Instance.new("TextBox")
 expBox.Size = UDim2.new(1, -20, 1, -74)
@@ -914,7 +984,7 @@ copyBtn.Position = UDim2.new(0, 10, 1, -34)
 copyBtn.BackgroundColor3 = COLOR_ACCENT
 copyBtn.BorderSizePixel = 0
 copyBtn.Font = Enum.Font.GothamBold
-copyBtn.Text = "📋 COPY TO CLIPBOARD"
+copyBtn.Text = "📋 COPY UNIFIED POSE"
 copyBtn.TextSize = 10
 copyBtn.TextColor3 = COLOR_BG
 copyBtn.ZIndex = 51
@@ -923,32 +993,30 @@ local cbc = Instance.new("UICorner")
 cbc.CornerRadius = UDim.new(0, 5)
 cbc.Parent = copyBtn
 
-expCloseBtn.Activated:Connect(function() exportWindow.Visible = false end)
-
-local function buildExportString()
+local function buildUnifiedExportString()
 	local lines = {}
-	table.insert(lines, "local CustomStandPose = {")
-	table.insert(lines, string.format("\tRigType = %q,", currentRigType))
-	table.insert(lines, "\tJoints = {")
-
-	for jointName, data in pairs(poseData) do
+	table.insert(lines, "local PairedPose = {")
+	table.insert(lines, string.format("\tStance = %q,", standStance))
+	table.insert(lines, "\tPlayerJoints = {")
+	for jointName, data in pairs(humanPoseData) do
 		if data.Pos.Magnitude > 0.001 or data.Rot.Magnitude > 0.001 then
-			table.insert(lines, string.format(
-				"\t\t[%q] = { Pos = Vector3.new(%.2f, %.2f, %.2f), Rot = Vector3.new(%d, %d, %d) },",
-				jointName,
-				data.Pos.X, data.Pos.Y, data.Pos.Z,
-				math.floor(data.Rot.X), math.floor(data.Rot.Y), math.floor(data.Rot.Z)
-			))
+			table.insert(lines, string.format("\t\t[%q] = { Pos = Vector3.new(%.2f, %.2f, %.2f), Rot = Vector3.new(%d, %d, %d) },", jointName, data.Pos.X, data.Pos.Y, data.Pos.Z, math.floor(data.Rot.X), math.floor(data.Rot.Y), math.floor(data.Rot.Z)))
 		end
 	end
-
+	table.insert(lines, "\t},")
+	table.insert(lines, "\tStandJoints = {")
+	for jointName, data in pairs(standPoseData) do
+		if data.Pos.Magnitude > 0.001 or data.Rot.Magnitude > 0.001 then
+			table.insert(lines, string.format("\t\t[%q] = { Pos = Vector3.new(%.2f, %.2f, %.2f), Rot = Vector3.new(%d, %d, %d) },", jointName, data.Pos.X, data.Pos.Y, data.Pos.Z, math.floor(data.Rot.X), math.floor(data.Rot.Y), math.floor(data.Rot.Z)))
+		end
+	end
 	table.insert(lines, "\t}")
 	table.insert(lines, "}")
 	return table.concat(lines, "\n")
 end
 
 createBottomBtn("📋 EXPORT", 0.68, 0.3, COLOR_LIGHT_DARK, function()
-	expBox.Text = buildExportString()
+	expBox.Text = buildUnifiedExportString()
 	exportWindow.Visible = true
 end)
 
@@ -958,40 +1026,30 @@ copyBtn.Activated:Connect(function()
 	if clipFunc then
 		pcall(function() clipFunc(exportStr) end)
 		copyBtn.Text = "✅ COPIED!"
-		task.delay(1.5, function() copyBtn.Text = "📋 COPY TO CLIPBOARD" end)
+		task.delay(1.5, function() copyBtn.Text = "📋 COPY UNIFIED POSE" end)
 	else
 		expBox:CaptureFocus()
 		expBox.SelectionStart = 1
 		expBox.CursorPosition = #exportStr + 1
 		copyBtn.Text = "👆 TAP NATIVE 'COPY' ABOVE!"
-		task.delay(2, function() copyBtn.Text = "📋 COPY TO CLIPBOARD" end)
+		task.delay(2, function() copyBtn.Text = "📋 COPY UNIFIED POSE" end)
 	end
 end)
 
 --------------------------------------------------------------------------------
--- 11. LIFECYCLE & CONTINUOUS RENDER
+-- 11. LIFECYCLE & RENDER LOOPS
 --------------------------------------------------------------------------------
 
-local function detectRig()
+local function initRig()
 	local char = player.Character or player.CharacterAdded:Wait()
-	local hum = char:WaitForChild("Humanoid", 5)
-	if hum and hum.RigType == Enum.HumanoidRigType.R15 then
-		currentRigType = "R15"
-		activeJointList = R15_JOINTS
-	else
-		currentRigType = "R6"
-		activeJointList = R6_JOINTS
-	end
-	rigToggleBtn.Text = "RIG: " .. currentRigType
 	initPoseData()
 	buildLimbButtons()
 	refreshScrubberUI()
 end
 
-task.spawn(detectRig)
-player.CharacterAdded:Connect(detectRig)
+task.spawn(initRig)
+player.CharacterAdded:Connect(initRig)
 
--- Continuous Updates: Mathematical Front/Back Placement
 RunService.RenderStepped:Connect(function()
 	if not isEditorActive then return end
 	local char = player.Character
@@ -1002,35 +1060,27 @@ RunService.RenderStepped:Connect(function()
 	end
 end)
 
--- Physics Pre-Step: Freezes background animations & applies transforms while editor is active
 RunService.Stepped:Connect(function()
 	if not isEditorActive then return end
-
 	local char = player.Character
 	if not char then return end
 
 	local hum = char:FindFirstChildOfClass("Humanoid")
 	local animator = hum and hum:FindFirstChildOfClass("Animator")
-
 	if animator then
-		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-			track:AdjustSpeed(0)
-		end
+		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do track:AdjustSpeed(0) end
 	end
 
+	-- Apply active pose data to the avatar you are currently controlling
+	local activeBank = (currentEditTarget == "Human") and humanPoseData or standPoseData
 	for _, def in ipairs(activeJointList) do
-		local data = poseData[def.JointName]
+		local data = activeBank[def.JointName]
 		if data then
 			local parentPart = char:FindFirstChild(def.ParentPart)
 			local joint = parentPart and parentPart:FindFirstChild(def.JointName)
-
 			if joint and joint:IsA("Motor6D") then
-				local radX = math.rad(data.Rot.X)
-				local radY = math.rad(data.Rot.Y)
-				local radZ = math.rad(data.Rot.Z)
-
-				joint.Transform = CFrame.new(data.Pos) * CFrame.fromEulerAnglesXYZ(radX, radY, radZ)
+				joint.Transform = CFrame.new(data.Pos) * CFrame.fromEulerAnglesXYZ(math.rad(data.Rot.X), math.rad(data.Rot.Y), math.rad(data.Rot.Z))
 			end
 		end
 	end
-end)
+end) 
