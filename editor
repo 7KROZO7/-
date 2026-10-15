@@ -1,4 +1,4 @@
--- LocalScript 1: PoseEditor inside StarterPlayerScripts
+-- LocalScript inside StarterPlayerScripts: PoseEditor
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -19,10 +19,9 @@ local COLOR_ACCENT = Color3.fromRGB(0, 245, 215)
 local COLOR_STAND = Color3.fromRGB(180, 120, 255)
 local COLOR_TEXT = Color3.fromRGB(240, 240, 240)
 local COLOR_MUTED = Color3.fromRGB(115, 120, 135)
-local COLOR_WARNING = Color3.fromRGB(255, 180, 50)
 
 --------------------------------------------------------------------------------
--- 2. RIG DEFINITIONS & DUAL MEMORY
+-- 2. PURE R6 RIG DEFINITIONS & DUAL MEMORY
 --------------------------------------------------------------------------------
 
 local R6_JOINTS = {
@@ -34,34 +33,13 @@ local R6_JOINTS = {
 	{ Name = "Left Leg",   PartName = "Left Leg",  JointName = "Left Hip",       ParentPart = "Torso" },
 }
 
-local R15_JOINTS = {
-	{ Name = "Head",            PartName = "Head",          JointName = "Neck",          ParentPart = "UpperTorso" },
-	{ Name = "UpperTorso",      PartName = "UpperTorso",    JointName = "Waist",         ParentPart = "LowerTorso" },
-	{ Name = "LowerTorso",      PartName = "LowerTorso",    JointName = "Root",          ParentPart = "HumanoidRootPart" },
-	{ Name = "Right UpperArm",  PartName = "RightUpperArm", JointName = "RightShoulder", ParentPart = "UpperTorso" },
-	{ Name = "Right LowerArm",  PartName = "RightLowerArm", JointName = "RightElbow",    ParentPart = "RightUpperArm" },
-	{ Name = "Right Hand",      PartName = "RightHand",     JointName = "RightWrist",    ParentPart = "RightLowerArm" },
-	{ Name = "Left UpperArm",   PartName = "LeftUpperArm",  JointName = "LeftShoulder",  ParentPart = "UpperTorso" },
-	{ Name = "Left LowerArm",   PartName = "LeftLowerArm",  JointName = "LeftElbow",     ParentPart = "LeftUpperArm" },
-	{ Name = "Left Hand",       PartName = "LeftHand",      JointName = "LeftWrist",     ParentPart = "LeftLowerArm" },
-	{ Name = "Right UpperLeg",  PartName = "RightUpperLeg", JointName = "RightHip",      ParentPart = "LowerTorso" },
-	{ Name = "Right LowerLeg",  PartName = "RightLowerLeg", JointName = "RightKnee",     ParentPart = "RightUpperLeg" },
-	{ Name = "Right Foot",      PartName = "RightFoot",     JointName = "RightAnkle",    ParentPart = "RightLowerLeg" },
-	{ Name = "Left UpperLeg",   PartName = "LeftUpperLeg",  JointName = "LeftHip",       ParentPart = "LowerTorso" },
-	{ Name = "Left LowerLeg",   PartName = "LeftLowerLeg",  JointName = "LeftKnee",      ParentPart = "LeftUpperLeg" },
-	{ Name = "Left Foot",       PartName = "LeftFoot",      JointName = "LeftAnkle",     ParentPart = "LeftLowerLeg" },
-}
-
-local currentRigType = "R6"
-local activeJointList = R6_JOINTS
 local selectedLimbIndex = 1
 local isEditorActive = true
 
--- Dual Memory Banks
+-- Dual Memory Banks (Never wipes when switching targets)
 local humanPoseData = {}
 local standPoseData = {}
 local currentEditTarget = "Human" -- "Human" or "Stand"
-local standStance = "SHOULDER"    -- "SHOULDER" or "EMBRACE"
 
 local savedHumanCFrame = nil
 local referenceDummy = nil
@@ -85,7 +63,7 @@ end
 local function initPoseData()
 	humanPoseData = {}
 	standPoseData = {}
-	for _, def in ipairs(activeJointList) do
+	for _, def in ipairs(R6_JOINTS) do
 		humanPoseData[def.JointName] = { Pos = Vector3.zero, Rot = Vector3.zero }
 		standPoseData[def.JointName] = { Pos = Vector3.zero, Rot = Vector3.zero }
 	end
@@ -94,7 +72,6 @@ local function initPoseData()
 end
 initPoseData()
 
--- Universal Motor6D Finder (Handles both R6 & R15 hierarchies)
 local function findJoint(char, def)
 	local p1 = char:FindFirstChild(def.ParentPart)
 	local j1 = p1 and p1:FindFirstChild(def.JointName)
@@ -104,6 +81,19 @@ local function findJoint(char, def)
 	local j2 = p2 and p2:FindFirstChild(def.JointName)
 	if j2 and j2:IsA("Motor6D") then return j2 end
 	return nil
+end
+
+-- Strips hats, clothing, hairs, and decals to create a solid clean R6 mannequin
+local function stripToMannequin(character, bodyColor)
+	for _, desc in ipairs(character:GetDescendants()) do
+		if desc:IsA("Accessory") or desc:IsA("Shirt") or desc:IsA("Pants") or desc:IsA("ShirtGraphic") or desc:IsA("Decal") then
+			desc:Destroy()
+		elseif desc:IsA("BasePart") then
+			desc.Material = Enum.Material.SmoothPlastic
+			desc.Color = bodyColor or Color3.fromRGB(240, 240, 245)
+			desc.Transparency = 0
+		end
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -152,7 +142,7 @@ local function setMarkersVisible(visible)
 end
 
 --------------------------------------------------------------------------------
--- 4. REFERENCE DUMMY SYSTEM (ANTI-CLIP PREVIEW)
+-- 4. REFERENCE DUMMY SYSTEM (PURE WHITE SOLID R6 MANNEQUIN)
 --------------------------------------------------------------------------------
 
 local function spawnReferenceDummy(originCF)
@@ -168,20 +158,19 @@ local function spawnReferenceDummy(originCF)
 	local dRoot = dummy:FindFirstChild("HumanoidRootPart")
 	if dRoot then dRoot.CFrame = originCF end
 
+	stripToMannequin(dummy, Color3.fromRGB(220, 220, 230))
+
 	for _, p in ipairs(dummy:GetDescendants()) do
 		if p:IsA("BasePart") then
 			p.CanCollide = false
 			p.Anchored = true
-			p.Material = Enum.Material.ForceField
-			p.Color = Color3.fromRGB(180, 180, 195)
-			p.Transparency = 0.4
 		elseif p:IsA("Script") or p:IsA("LocalScript") or p:IsA("Sound") then
 			p:Destroy()
 		end
 	end
 
-	-- Apply the exact human pose onto the reference dummy
-	for _, def in ipairs(activeJointList) do
+	-- Apply the exact custom human pose onto the reference dummy
+	for _, def in ipairs(R6_JOINTS) do
 		local data = humanPoseData[def.JointName]
 		if data then
 			local joint = findJoint(dummy, def)
@@ -257,39 +246,34 @@ pillBtn.TextSize = 10
 pillBtn.TextColor3 = COLOR_ACCENT
 pillBtn.Parent = minPill
 
--- Drag logic for the minimized pill
-local function setupDraggable(frame)
-	local dragging = false
-	local dragStart = Vector2.zero
-	local startPos = UDim2.new()
-	local moved = 0
+-- Drag logic for the Minimized Pill
+local pillDragging = false
+local pillDragStart = Vector2.zero
+local pillStartPos = UDim2.new()
+local pillMoved = 0
 
-	frame.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-			dragging = true
-			dragStart = input.Position
-			startPos = frame.Position
-			moved = 0
-			input.Changed:Connect(function()
-				if input.UserInputState == Enum.UserInputState.End then dragging = false end
-			end)
-		end
-	end)
+minPill.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+		pillDragging = true
+		pillDragStart = input.Position
+		pillStartPos = minPill.Position
+		pillMoved = 0
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then pillDragging = false end
+		end)
+	end
+end)
 
-	UserInputService.InputChanged:Connect(function(input)
-		if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
-			local delta = input.Position - dragStart
-			moved = delta.Magnitude
-			frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-		end
-	end)
+UserInputService.InputChanged:Connect(function(input)
+	if pillDragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+		local delta = input.Position - pillDragStart
+		pillMoved = delta.Magnitude
+		minPill.Position = UDim2.new(pillStartPos.X.Scale, pillStartPos.X.Offset + delta.X, pillStartPos.Y.Scale, pillStartPos.Y.Offset + delta.Y)
+	end
+end)
 
-	return function() return moved < 8 end
-end
-
-local isCleanTapPill = setupDraggable(minPill)
 pillBtn.Activated:Connect(function()
-	if isCleanTapPill() then
+	if pillMoved < 8 then
 		mainWindow.Visible = true
 		minPill.Visible = false
 		isEditorActive = true
@@ -307,11 +291,33 @@ header.Parent = mainWindow
 local hCorner = Instance.new("UICorner")
 hCorner.CornerRadius = UDim.new(0, 8)
 hCorner.Parent = header
-setupDraggable(header)
+
+-- PROPER WINDOW DRAGGING LOGIC (Moves mainWindow!)
+local winDragging = false
+local winDragStart = Vector2.zero
+local winStartPos = UDim2.new()
+
+header.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+		winDragging = true
+		winDragStart = input.Position
+		winStartPos = mainWindow.Position
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then winDragging = false end
+		end)
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if winDragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+		local delta = input.Position - winDragStart
+		mainWindow.Position = UDim2.new(winStartPos.X.Scale, winStartPos.X.Offset + delta.X, winStartPos.Y.Scale, winStartPos.Y.Offset + delta.Y)
+	end
+end)
 
 -- Target Switcher [ 👤 HUMAN ] vs [ 🦾 STAND ]
 local targetSwitchBtn = Instance.new("TextButton")
-targetSwitchBtn.Size = UDim2.fromOffset(72, 20)
+targetSwitchBtn.Size = UDim2.fromOffset(84, 20)
 targetSwitchBtn.Position = UDim2.new(0, 6, 0.5, -10)
 targetSwitchBtn.BackgroundColor3 = COLOR_ACTIVE
 targetSwitchBtn.BorderSizePixel = 0
@@ -324,39 +330,9 @@ local tsc = Instance.new("UICorner")
 tsc.CornerRadius = UDim.new(0, 4)
 tsc.Parent = targetSwitchBtn
 
-local stanceBtn = Instance.new("TextButton")
-stanceBtn.Size = UDim2.fromOffset(76, 20)
-stanceBtn.Position = UDim2.new(0, 82, 0.5, -10)
-stanceBtn.BackgroundColor3 = COLOR_DARK
-stanceBtn.BorderSizePixel = 0
-stanceBtn.Font = Enum.Font.GothamBold
-stanceBtn.Text = "👑 SHOULDER"
-stanceBtn.TextSize = 8
-stanceBtn.TextColor3 = COLOR_MUTED
-stanceBtn.Visible = false
-stanceBtn.Parent = header
-local stc = Instance.new("UICorner")
-stc.CornerRadius = UDim.new(0, 4)
-stc.Parent = stanceBtn
-
--- Rig Toggle Button [ RIG: R6 / R15 ]
-local rigToggleBtn = Instance.new("TextButton")
-rigToggleBtn.Size = UDim2.fromOffset(56, 20)
-rigToggleBtn.Position = UDim2.new(1, -170, 0.5, -10)
-rigToggleBtn.BackgroundColor3 = COLOR_DARK
-rigToggleBtn.BorderSizePixel = 0
-rigToggleBtn.Font = Enum.Font.GothamBold
-rigToggleBtn.Text = "RIG: " .. currentRigType
-rigToggleBtn.TextSize = 8
-rigToggleBtn.TextColor3 = COLOR_ACCENT
-rigToggleBtn.Parent = header
-local rtc = Instance.new("UICorner")
-rtc.CornerRadius = UDim.new(0, 4)
-rtc.Parent = rigToggleBtn
-
 local undoBtn = Instance.new("TextButton")
-undoBtn.Size = UDim2.fromOffset(22, 20)
-undoBtn.Position = UDim2.new(1, -110, 0.5, -10)
+undoBtn.Size = UDim2.fromOffset(24, 20)
+undoBtn.Position = UDim2.new(1, -114, 0.5, -10)
 undoBtn.BackgroundColor3 = COLOR_DARK
 undoBtn.BorderSizePixel = 0
 undoBtn.Font = Enum.Font.GothamBold
@@ -369,8 +345,8 @@ uCorner.CornerRadius = UDim.new(0, 4)
 uCorner.Parent = undoBtn
 
 local redoBtn = Instance.new("TextButton")
-redoBtn.Size = UDim2.fromOffset(22, 20)
-redoBtn.Position = UDim2.new(1, -84, 0.5, -10)
+redoBtn.Size = UDim2.fromOffset(24, 20)
+redoBtn.Position = UDim2.new(1, -86, 0.5, -10)
 redoBtn.BackgroundColor3 = COLOR_DARK
 redoBtn.BorderSizePixel = 0
 redoBtn.Font = Enum.Font.GothamBold
@@ -383,7 +359,7 @@ rCorner.CornerRadius = UDim.new(0, 4)
 rCorner.Parent = redoBtn
 
 local minBtn = Instance.new("TextButton")
-minBtn.Size = UDim2.fromOffset(22, 20)
+minBtn.Size = UDim2.fromOffset(24, 20)
 minBtn.Position = UDim2.new(1, -58, 0.5, -10)
 minBtn.BackgroundColor3 = COLOR_DARK
 minBtn.BorderSizePixel = 0
@@ -398,7 +374,7 @@ mbc.Parent = minBtn
 
 local exitBtn = Instance.new("TextButton")
 exitBtn.Size = UDim2.fromOffset(26, 20)
-exitBtn.Position = UDim2.new(1, -32, 0.5, -10)
+exitBtn.Position = UDim2.new(1, -30, 0.5, -10)
 exitBtn.BackgroundColor3 = Color3.fromRGB(55, 25, 30)
 exitBtn.BorderSizePixel = 0
 exitBtn.Font = Enum.Font.GothamBold
@@ -409,19 +385,6 @@ exitBtn.Parent = header
 local exCorner = Instance.new("UICorner")
 exCorner.CornerRadius = UDim.new(0, 4)
 exCorner.Parent = exitBtn
-
--- Rig Mismatch Warning Banner
-local rigWarnLabel = Instance.new("TextLabel")
-rigWarnLabel.Size = UDim2.new(1, 0, 0, 14)
-rigWarnLabel.Position = UDim2.new(0, 0, 0, 32)
-rigWarnLabel.BackgroundColor3 = Color3.fromRGB(45, 30, 15)
-rigWarnLabel.BorderSizePixel = 0
-rigWarnLabel.Font = Enum.Font.GothamBold
-rigWarnLabel.Text = "⚠️ AVATAR IS R15 (EDITING R6)"
-rigWarnLabel.TextSize = 7
-rigWarnLabel.TextColor3 = COLOR_WARNING
-rigWarnLabel.Visible = false
-rigWarnLabel.Parent = mainWindow
 
 --------------------------------------------------------------------------------
 -- 6. LEFT PANEL: LIMB LIST & CRISP WHITE OUTLINE
@@ -443,6 +406,7 @@ local lsLayout = Instance.new("UIListLayout")
 lsLayout.Padding = UDim.new(0, 3)
 lsLayout.Parent = limbScroll
 
+-- Subtle White Outline (Fill Transparency = 1)
 local limbHighlight = Instance.new("Highlight")
 limbHighlight.Name = "EditorLimbHighlight"
 limbHighlight.FillTransparency = 1
@@ -457,7 +421,7 @@ local function updateHighlight()
 	if not isEditorActive then limbHighlight.Enabled = false; return end
 	local char = player.Character
 	if not char then limbHighlight.Enabled = false; return end
-	local def = activeJointList[selectedLimbIndex]
+	local def = R6_JOINTS[selectedLimbIndex]
 	if not def then limbHighlight.Enabled = false; return end
 
 	local part = char:FindFirstChild(def.PartName)
@@ -474,7 +438,7 @@ local function buildLimbButtons()
 	for _, b in ipairs(limbButtons) do b:Destroy() end
 	limbButtons = {}
 
-	for idx, def in ipairs(activeJointList) do
+	for idx, def in ipairs(R6_JOINTS) do
 		local btn = Instance.new("TextButton")
 		btn.Name = def.JointName
 		btn.Size = UDim2.new(1, -6, 0, 20)
@@ -501,7 +465,7 @@ local function buildLimbButtons()
 		end)
 		table.insert(limbButtons, btn)
 	end
-	limbScroll.CanvasSize = UDim2.new(0, 0, 0, #activeJointList * 23 + 6)
+	limbScroll.CanvasSize = UDim2.new(0, 0, 0, #R6_JOINTS * 23 + 6)
 	updateHighlight()
 end
 
@@ -636,7 +600,7 @@ scrubLabel.TextColor3 = COLOR_MUTED
 scrubLabel.Parent = scrubBox
 
 local function getActiveData()
-	local def = activeJointList[selectedLimbIndex]
+	local def = R6_JOINTS[selectedLimbIndex]
 	if not def then return nil end
 	local bank = (currentEditTarget == "Human") and humanPoseData or standPoseData
 	return bank[def.JointName]
@@ -779,40 +743,7 @@ posTabBtn.Activated:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- 8. RIG TOGGLE & MISMATCH CHECK
---------------------------------------------------------------------------------
-
-local function checkRigMismatch()
-	local char = player.Character
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	local actualRig = (hum and hum.RigType == Enum.HumanoidRigType.R15) and "R15" or "R6"
-
-	if currentRigType ~= actualRig then
-		rigWarnLabel.Text = string.format("⚠️ AVATAR IS %s (EDITING %s)", actualRig, currentRigType)
-		rigWarnLabel.Visible = true
-	else
-		rigWarnLabel.Visible = false
-	end
-end
-
-rigToggleBtn.Activated:Connect(function()
-	if currentRigType == "R15" then
-		currentRigType = "R6"
-		activeJointList = R6_JOINTS
-	else
-		currentRigType = "R15"
-		activeJointList = R15_JOINTS
-	end
-	selectedLimbIndex = 1
-	rigToggleBtn.Text = "RIG: " .. currentRigType
-	initPoseData()
-	buildLimbButtons()
-	refreshScrubberUI()
-	checkRigMismatch()
-end)
-
---------------------------------------------------------------------------------
--- 9. TARGET SWITCHER: ANCHORED STAND & UNANCHORED HUMAN
+-- 8. TARGET SWITCHER: ANCHORED STAND & UNANCHORED HUMAN
 --------------------------------------------------------------------------------
 
 targetSwitchBtn.Activated:Connect(function()
@@ -824,23 +755,23 @@ targetSwitchBtn.Activated:Connect(function()
 		currentEditTarget = "Stand"
 		targetSwitchBtn.Text = "🦾 STAND"
 		targetSwitchBtn.TextColor3 = COLOR_STAND
-		stanceBtn.Visible = true
 
 		if root then
 			savedHumanCFrame = root.CFrame
 			spawnReferenceDummy(savedHumanCFrame)
 
-			-- Anchor and position character at shoulder/side in the air
+			-- Anchor and position character at shoulder/side in mid-air
 			root.Anchored = true
-			local offset = (standStance == "EMBRACE") and CFrame.new(0, 0.1, 0.65) or CFrame.new(2.5, 1.5, 2.5)
-			root.CFrame = savedHumanCFrame * offset
+			root.CFrame = savedHumanCFrame * CFrame.new(2.5, 1.5, 2.5)
+
+			-- Strip avatar temporarily to clean solid Stand mannequin
+			stripToMannequin(char, Color3.fromRGB(240, 240, 250))
 		end
 	else
 		-- Switch back to Human Mode
 		currentEditTarget = "Human"
 		targetSwitchBtn.Text = "👤 HUMAN"
 		targetSwitchBtn.TextColor3 = COLOR_ACCENT
-		stanceBtn.Visible = false
 
 		removeReferenceDummy()
 
@@ -853,28 +784,8 @@ targetSwitchBtn.Activated:Connect(function()
 	refreshScrubberUI()
 end)
 
-stanceBtn.Activated:Connect(function()
-	if standStance == "SHOULDER" then
-		standStance = "EMBRACE"
-		stanceBtn.Text = "🫂 EMBRACE"
-		stanceBtn.TextColor3 = Color3.fromRGB(255, 140, 200)
-	else
-		standStance = "SHOULDER"
-		stanceBtn.Text = "👑 SHOULDER"
-		stanceBtn.TextColor3 = COLOR_ACCENT
-	end
-
-	-- Immediately reposition Stand in mid-air
-	local char = player.Character
-	local root = char and char:FindFirstChild("HumanoidRootPart")
-	if root and savedHumanCFrame and currentEditTarget == "Stand" then
-		local offset = (standStance == "EMBRACE") and CFrame.new(0, 0.1, 0.65) or CFrame.new(2.5, 1.5, 2.5)
-		root.CFrame = savedHumanCFrame * offset
-	end
-end)
-
 --------------------------------------------------------------------------------
--- 10. UNDO, REDO & FULL RESTORE
+-- 9. UNDO, REDO & FULL RESTORE
 --------------------------------------------------------------------------------
 
 undoBtn.Activated:Connect(function()
@@ -929,7 +840,7 @@ local function fullRestore()
 		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do track:AdjustSpeed(1) end
 	end
 
-	for _, def in ipairs(activeJointList) do
+	for _, def in ipairs(R6_JOINTS) do
 		local joint = findJoint(char, def)
 		if joint then joint.Transform = CFrame.identity end
 	end
@@ -938,7 +849,7 @@ end
 exitBtn.Activated:Connect(fullRestore)
 
 --------------------------------------------------------------------------------
--- 11. BOTTOM TOOLBAR & UNIFIED DUAL EXPORT
+-- 10. BOTTOM TOOLBAR & UNIFIED EXPORT
 --------------------------------------------------------------------------------
 
 local function createBottomBtn(text, posX, width, color, callback)
@@ -960,16 +871,11 @@ local function createBottomBtn(text, posX, width, color, callback)
 end
 
 createBottomBtn("🪞 MIRROR", 0.02, 0.3, COLOR_LIGHT_DARK, function()
-	local def = activeJointList[selectedLimbIndex]
+	local def = R6_JOINTS[selectedLimbIndex]
 	if not def then return end
 	local pairsMap = {
 		["Right Shoulder"] = "Left Shoulder", ["Left Shoulder"] = "Right Shoulder",
 		["Right Hip"]      = "Left Hip",       ["Left Hip"]      = "Right Hip",
-		["RightShoulder"]  = "LeftShoulder",   ["LeftShoulder"]  = "RightShoulder",
-		["RightElbow"]     = "LeftElbow",      ["LeftElbow"]     = "RightElbow",
-		["RightWrist"]     = "LeftWrist",      ["LeftWrist"]     = "RightWrist",
-		["RightKnee"]      = "LeftKnee",       ["LeftKnee"]      = "RightKnee",
-		["RightAnkle"]     = "LeftAnkle",      ["LeftAnkle"]     = "RightAnkle",
 	}
 	local targetName = pairsMap[def.JointName]
 	local bank = (currentEditTarget == "Human") and humanPoseData or standPoseData
@@ -985,7 +891,7 @@ end)
 createBottomBtn("🔄 RESET", 0.35, 0.3, COLOR_DARK, function()
 	pushHistory()
 	local bank = (currentEditTarget == "Human") and humanPoseData or standPoseData
-	for _, def in ipairs(activeJointList) do
+	for _, def in ipairs(R6_JOINTS) do
 		bank[def.JointName] = { Pos = Vector3.zero, Rot = Vector3.zero }
 	end
 	refreshScrubberUI()
@@ -1014,7 +920,7 @@ expTitle.Size = UDim2.new(1, -60, 0, 26)
 expTitle.Position = UDim2.new(0, 10, 0, 4)
 expTitle.BackgroundTransparency = 1
 expTitle.Font = Enum.Font.GothamBold
-expTitle.Text = "📋 UNIFIED PAIRED POSE TABLE"
+expTitle.Text = "📋 UNIFIED POSE EXPORT"
 expTitle.TextSize = 10
 expTitle.TextColor3 = COLOR_TEXT
 expTitle.TextXAlignment = Enum.TextXAlignment.Left
@@ -1073,8 +979,7 @@ cbc.Parent = copyBtn
 local function buildUnifiedExportString()
 	local lines = {}
 	table.insert(lines, "local PairedPose = {")
-	table.insert(lines, string.format("\tRigType = %q,", currentRigType))
-	table.insert(lines, string.format("\tStance = %q,", standStance))
+	table.insert(lines, "\tRigType = \"R6\",")
 	table.insert(lines, "\tPlayerJoints = {")
 	for jointName, data in pairs(humanPoseData) do
 		if data.Pos.Magnitude > 0.001 or data.Rot.Magnitude > 0.001 then
@@ -1115,24 +1020,14 @@ copyBtn.Activated:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- 12. LIFECYCLE & RENDER LOOPS
+-- 11. LIFECYCLE & RENDER LOOPS
 --------------------------------------------------------------------------------
 
 local function initRig()
 	local char = player.Character or player.CharacterAdded:Wait()
-	local hum = char:WaitForChild("Humanoid", 5)
-	if hum and hum.RigType == Enum.HumanoidRigType.R15 then
-		currentRigType = "R15"
-		activeJointList = R15_JOINTS
-	else
-		currentRigType = "R6"
-		activeJointList = R6_JOINTS
-	end
-	rigToggleBtn.Text = "RIG: " .. currentRigType
 	initPoseData()
 	buildLimbButtons()
 	refreshScrubberUI()
-	checkRigMismatch()
 end
 
 task.spawn(initRig)
@@ -1160,7 +1055,7 @@ RunService.Stepped:Connect(function()
 	end
 
 	local activeBank = (currentEditTarget == "Human") and humanPoseData or standPoseData
-	for _, def in ipairs(activeJointList) do
+	for _, def in ipairs(R6_JOINTS) do
 		local data = activeBank[def.JointName]
 		if data then
 			local joint = findJoint(char, def)
