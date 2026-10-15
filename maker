@@ -6,6 +6,7 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
 
 --------------------------------------------------------------------------------
 -- 1. THEME & PALETTES
@@ -23,17 +24,63 @@ local COLOR_MUTED = Color3.fromRGB(115, 120, 135)
 local COLOR_DANGER = Color3.fromRGB(240, 80, 80)
 
 --------------------------------------------------------------------------------
--- 2. STATE & PARSER
+-- 2. HARDCODED CUTSCENE POSES
 --------------------------------------------------------------------------------
-
-local playlist = {} -- Empty playlist by default
 
 local function toCFrame(pos, rot)
 	return CFrame.new(pos) * CFrame.fromEulerAnglesXYZ(math.rad(rot.X), math.rad(rot.Y), math.rad(rot.Z))
 end
 
--- Universal Motor6D Finder (Works across both R6 and R15 rigs)
-local function findJointByName(char, jointName)
+-- 1. Human Summon Idle
+local HUMAN_SUMMON_IDLE = {
+	["Left Shoulder"]  = toCFrame(Vector3.new(0.00, 0.00, 0.23),  Vector3.new(27, 0, -20)),
+	["Right Shoulder"] = toCFrame(Vector3.new(0.00, 0.00, 0.00),  Vector3.new(2, -17, 12)),
+	["Neck"]           = toCFrame(Vector3.new(0.00, 0.00, 0.00),  Vector3.new(12, 8, 31)),
+	["Right Hip"]      = toCFrame(Vector3.new(0.00, 0.16, 0.00),  Vector3.new(-5, -24, -7)),
+	["Left Hip"]       = toCFrame(Vector3.new(0.00, 0.01, 0.21),  Vector3.new(6, 37, -10)),
+	["RootJoint"]      = toCFrame(Vector3.new(0.00, 0.00, -0.08), Vector3.new(6, -10, -38)),
+}
+
+-- 2. Stand Emergence / Idle Pose
+local STAND_IDLE_POSE = {
+	["Left Shoulder"]  = toCFrame(Vector3.new(0.00, 0.00, 0.00),  Vector3.new(-9, 35, 13)),
+	["Right Shoulder"] = toCFrame(Vector3.new(0.00, 0.00, 0.00),  Vector3.new(-9, -36, -14)),
+	["Neck"]           = toCFrame(Vector3.new(0.00, 0.00, 0.00),  Vector3.new(13, 0, 0)),
+	["Right Hip"]      = toCFrame(Vector3.new(0.34, 0.46, -0.02), Vector3.new(0, -25, -11)),
+	["Left Hip"]       = toCFrame(Vector3.new(0.21, -0.03, 0.60), Vector3.new(0, 24, 35)),
+	["RootJoint"]      = toCFrame(Vector3.new(0.00, 0.00, 0.00),  Vector3.new(-6, 0, 0)),
+}
+
+-- 3. Stand Roar Wind-Up
+local STAND_WINDUP_POSE = {
+	["Left Shoulder"]  = toCFrame(Vector3.new(0.00, 0.00, 0.00),  Vector3.new(86, -51, -56)),
+	["Right Shoulder"] = toCFrame(Vector3.new(0.00, 0.00, 0.00),  Vector3.new(86, 50, 55)),
+	["Neck"]           = toCFrame(Vector3.new(0.00, 0.00, 0.00),  Vector3.new(58, 0, 0)),
+	["Right Hip"]      = toCFrame(Vector3.new(0.34, 1.11, -0.02), Vector3.new(0, -25, -11)),
+	["Left Hip"]       = toCFrame(Vector3.new(-0.34, 0.76, -0.02), Vector3.new(0, 24, 10)),
+	["RootJoint"]      = toCFrame(Vector3.new(0.00, 0.00, 0.00),  Vector3.new(-6, 0, 0)),
+}
+
+-- 4. Stand Roar Release
+local STAND_ROAR_POSE = {
+	["Left Shoulder"]  = toCFrame(Vector3.new(0.00, 0.00, 0.00),  Vector3.new(63, -1, -142)),
+	["Right Shoulder"] = toCFrame(Vector3.new(0.00, 0.00, 0.00),  Vector3.new(63, 0, 141)),
+	["Neck"]           = toCFrame(Vector3.new(0.00, 0.00, 0.00),  Vector3.new(-21, 0, 0)),
+	["Right Hip"]      = toCFrame(Vector3.new(0.08, 0.39, -0.02), Vector3.new(-27, -25, -11)),
+	["Left Hip"]       = toCFrame(Vector3.new(-0.08, 0.39, -0.02), Vector3.new(-27, 24, 10)),
+	["RootJoint"]      = toCFrame(Vector3.new(0.00, 0.00, 0.00),  Vector3.new(-6, 0, 0)),
+}
+
+local BASE_SHOULDER_OFFSET = Vector3.new(2.2, 1.2, 1.8)
+
+--------------------------------------------------------------------------------
+-- 3. STATE & PARSER
+--------------------------------------------------------------------------------
+
+local playlist = {} -- Empty playlist by default
+
+local function findJoint(char, jointName)
+	if not char then return nil end
 	for _, desc in ipairs(char:GetDescendants()) do
 		if desc:IsA("Motor6D") and desc.Name == jointName then
 			return desc
@@ -53,42 +100,49 @@ local function parseUnifiedTable(text)
 	end
 
 	local rigType = text:match('RigType%s*=%s*"([^"]+)"') or "R6"
-	local stance = text:match('Stance%s*=%s*"([^"]+)"') or "SHOULDER"
 	local playerBlock = text:match('PlayerJoints%s*=%s*%{([^%}]+)%}') or text
 	local standBlock = text:match('StandJoints%s*=%s*%{([^%}]+)%}')
 
 	local pJoints = extractJoints(playerBlock)
 	local sJoints = extractJoints(standBlock)
 
-	return pJoints, sJoints, stance, rigType
+	return pJoints, sJoints, rigType
 end
 
-local isPlaying = false
-local playbackMode = "Cycle" -- "AuraFarm", "Cycle", or "Shuffle"
+-- Playback & Cutscene States
+local isStandSummoned = false -- Passive Stand toggle
+local isPosing = false        -- Active pose playback
+local cutsceneStage = "None"   -- "None", "Emerge", "WindUp", "Roar", "Playing"
+
+local cutsceneStartTime = 0
+local playbackMode = "Cycle"   -- "AuraFarm", "Cycle", or "Shuffle"
 local switchInterval = 1.50
-local TRANSITION_TIME = 0.30
 
 local currentPoseIndex = 1
 local lastPoseIndex = 0
-local transitionStartTime = 0
 local lastSwitchTime = 0
+local poseTransitionTime = 0
 
 local startPlayerCF = {}
 local activePlayerCF = {}
 local startStandCF = {}
 local activeStandCF = {}
 
-local standEntity = nil
+local standModel = nil
 local lastGlyphTime = 0
 
+-- Screen Shake State
+local isShaking = false
+local shakeIntensity = 0
+
 --------------------------------------------------------------------------------
--- 3. SCREEN GUI & MAIN WINDOW
+-- 4. SCREEN GUI & MAIN WINDOW
 --------------------------------------------------------------------------------
 
 local playerGui = player:WaitForChild("PlayerGui")
 
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "DualPoseSequencerGui"
+screenGui.Name = "PoseMakerSequencerGui"
 screenGui.ResetOnSpawn = false
 screenGui.IgnoreGuiInset = true
 screenGui.DisplayOrder = 999
@@ -110,11 +164,11 @@ mainStroke.Thickness = 1.6
 mainStroke.Color = COLOR_ACCENT
 mainStroke.Parent = mainWindow
 
--- Minimized Pill (Starts at Y = 0.65 to prevent overlap with Pose Editor)
+-- Minimized Pill (Starts at Y = 0.65)
 local minCapsule = Instance.new("Frame")
 minCapsule.Name = "MakerMinCapsule"
-minCapsule.Size = UDim2.fromOffset(180, 36)
-minCapsule.Position = UDim2.new(0.85, -90, 0.65, 0)
+minCapsule.Size = UDim2.fromOffset(190, 36)
+minCapsule.Position = UDim2.new(0.85, -95, 0.65, 0)
 minCapsule.BackgroundColor3 = COLOR_BG
 minCapsule.BorderSizePixel = 0
 minCapsule.Active = true
@@ -128,9 +182,23 @@ mcStroke.Thickness = 1.6
 mcStroke.Color = COLOR_ACCENT
 mcStroke.Parent = minCapsule
 
+local minStandBtn = Instance.new("TextButton")
+minStandBtn.Size = UDim2.fromOffset(28, 28)
+minStandBtn.Position = UDim2.new(0, 4, 0.5, -14)
+minStandBtn.BackgroundColor3 = COLOR_DARK
+minStandBtn.BorderSizePixel = 0
+minStandBtn.Font = Enum.Font.GothamBold
+minStandBtn.Text = "🦾"
+minStandBtn.TextSize = 13
+minStandBtn.TextColor3 = COLOR_STAND
+minStandBtn.Parent = minCapsule
+local msbc = Instance.new("UICorner")
+msbc.CornerRadius = UDim.new(0, 14)
+msbc.Parent = minStandBtn
+
 local minPlayBtn = Instance.new("TextButton")
 minPlayBtn.Size = UDim2.fromOffset(28, 28)
-minPlayBtn.Position = UDim2.new(0, 4, 0.5, -14)
+minPlayBtn.Position = UDim2.new(0, 36, 0.5, -14)
 minPlayBtn.BackgroundColor3 = COLOR_LIGHT_DARK
 minPlayBtn.BorderSizePixel = 0
 minPlayBtn.Font = Enum.Font.GothamBold
@@ -143,11 +211,11 @@ mpbc.CornerRadius = UDim.new(0, 14)
 mpbc.Parent = minPlayBtn
 
 local minStatusText = Instance.new("TextLabel")
-minStatusText.Size = UDim2.new(1, -66, 1, 0)
-minStatusText.Position = UDim2.new(0, 36, 0, 0)
+minStatusText.Size = UDim2.new(1, -98, 1, 0)
+minStatusText.Position = UDim2.new(0, 68, 0, 0)
 minStatusText.BackgroundTransparency = 1
 minStatusText.Font = Enum.Font.GothamBold
-minStatusText.Text = "MAKER: OFF"
+minStatusText.Text = "IDLE"
 minStatusText.TextSize = 9
 minStatusText.TextColor3 = COLOR_MUTED
 minStatusText.TextXAlignment = Enum.TextXAlignment.Left
@@ -167,16 +235,19 @@ local mebc = Instance.new("UICorner")
 mebc.CornerRadius = UDim.new(0, 4)
 mebc.Parent = minExpandBtn
 
-local function makeCapsuleDraggable(frame)
+-- Drag logic for Minimized Pill
+local function setupDraggable(frame)
 	local dragging = false
 	local dragStart = Vector2.zero
 	local startPos = UDim2.new()
+	local moved = 0
 
 	frame.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
 			dragging = true
 			dragStart = input.Position
 			startPos = frame.Position
+			moved = 0
 			input.Changed:Connect(function()
 				if input.UserInputState == Enum.UserInputState.End then dragging = false end
 			end)
@@ -186,19 +257,20 @@ local function makeCapsuleDraggable(frame)
 	UserInputService.InputChanged:Connect(function(input)
 		if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
 			local delta = input.Position - dragStart
+			moved = delta.Magnitude
 			frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
 		end
 	end)
 end
 
-makeCapsuleDraggable(minCapsule)
+setupDraggable(minCapsule)
 
 minExpandBtn.Activated:Connect(function()
 	mainWindow.Visible = true
 	minCapsule.Visible = false
 end)
 
--- Header
+-- Header Bar
 local header = Instance.new("Frame")
 header.Name = "Header"
 header.Size = UDim2.new(1, 0, 0, 32)
@@ -208,18 +280,35 @@ header.Parent = mainWindow
 local hCorner = Instance.new("UICorner")
 hCorner.CornerRadius = UDim.new(0, 8)
 hCorner.Parent = header
+setupDraggable(header)
 
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(0.4, 0, 1, 0)
+title.Size = UDim2.new(0.35, 0, 1, 0)
 title.Position = UDim2.new(0, 10, 0, 0)
 title.BackgroundTransparency = 1
 title.Font = Enum.Font.GothamBold
-title.Text = "🌟 DUAL-POSE SEQUENCER"
+title.Text = "🌟 POSE SEQUENCER"
 title.TextSize = 9
 title.TextColor3 = COLOR_TEXT
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Parent = header
 
+-- Stand Passive Summon Toggle [ 🦾 STAND ]
+local standSummonBtn = Instance.new("TextButton")
+standSummonBtn.Size = UDim2.fromOffset(78, 22)
+standSummonBtn.Position = UDim2.new(1, -196, 0.5, -11)
+standSummonBtn.BackgroundColor3 = COLOR_DARK
+standSummonBtn.BorderSizePixel = 0
+standSummonBtn.Font = Enum.Font.GothamBold
+standSummonBtn.Text = "🦾 STAND: OFF"
+standSummonBtn.TextSize = 8
+standSummonBtn.TextColor3 = COLOR_STAND
+standSummonBtn.Parent = header
+local ssbc = Instance.new("UICorner")
+ssbc.CornerRadius = UDim.new(0, 4)
+ssbc.Parent = standSummonBtn
+
+-- Play / Stop Master Toggle Button
 local playBtn = Instance.new("TextButton")
 playBtn.Size = UDim2.fromOffset(80, 22)
 playBtn.Position = UDim2.new(1, -114, 0.5, -11)
@@ -253,30 +342,8 @@ minBtn.Activated:Connect(function()
 	minCapsule.Visible = true
 end)
 
-local hDragging = false
-local hDragStart = Vector2.zero
-local hStartPos = UDim2.new()
-
-header.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-		hDragging = true
-		hDragStart = input.Position
-		hStartPos = mainWindow.Position
-		input.Changed:Connect(function()
-			if input.UserInputState == Enum.UserInputState.End then hDragging = false end
-		end)
-	end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-	if hDragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
-		local delta = input.Position - hDragStart
-		mainWindow.Position = UDim2.new(hStartPos.X.Scale, hStartPos.X.Offset + delta.X, hStartPos.Y.Scale, hStartPos.Y.Offset + delta.Y)
-	end
-end)
-
 --------------------------------------------------------------------------------
--- 4. LEFT PANEL: PLAYLIST SLOTS (REORDER & REMOVE)
+-- 5. LEFT PANEL: PLAYLIST SLOTS
 --------------------------------------------------------------------------------
 
 local leftPanel = Instance.new("Frame")
@@ -336,7 +403,7 @@ refreshPlaylistUI = function()
 		for idx, item in ipairs(playlist) do
 			local card = Instance.new("Frame")
 			card.Size = UDim2.new(1, -4, 0, 26)
-			card.BackgroundColor3 = (isPlaying and idx == currentPoseIndex) and COLOR_ACTIVE or COLOR_BG
+			card.BackgroundColor3 = (isPosing and idx == currentPoseIndex) and COLOR_ACTIVE or COLOR_BG
 			card.BorderSizePixel = 0
 			card.Parent = slotScroll
 			local cc = Instance.new("UICorner")
@@ -350,7 +417,7 @@ refreshPlaylistUI = function()
 			nameLabel.Font = Enum.Font.GothamBold
 			nameLabel.Text = string.format("[%s] %d. %s", item.RigType or "R6", idx, item.Name)
 			nameLabel.TextSize = 8
-			nameLabel.TextColor3 = (isPlaying and idx == currentPoseIndex) and COLOR_ACCENT or COLOR_TEXT
+			nameLabel.TextColor3 = (isPosing and idx == currentPoseIndex) and COLOR_ACCENT or COLOR_TEXT
 			nameLabel.TextXAlignment = Enum.TextXAlignment.Left
 			nameLabel.Parent = card
 
@@ -418,7 +485,7 @@ refreshPlaylistUI = function()
 			delBtn.Activated:Connect(function()
 				table.remove(playlist, idx)
 				if #playlist < currentPoseIndex then currentPoseIndex = 1 end
-				if #playlist == 0 and isPlaying then stopPlayback() end
+				if #playlist == 0 and isPosing then stopPlayback() end
 				refreshPlaylistUI()
 				refreshModeButtons()
 			end)
@@ -458,7 +525,7 @@ cbc.CornerRadius = UDim.new(0, 4)
 cbc.Parent = clearBtn
 
 clearBtn.Activated:Connect(function()
-	if isPlaying then stopPlayback() end
+	if isPosing then stopPlayback() end
 	playlist = {}
 	currentPoseIndex = 1
 	refreshPlaylistUI()
@@ -466,7 +533,7 @@ clearBtn.Activated:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- 5. RIGHT PANEL: MODES & SPEED TIMER
+-- 6. RIGHT PANEL: MODES & SPEED TIMER
 --------------------------------------------------------------------------------
 
 local rightPanel = Instance.new("Frame")
@@ -586,7 +653,7 @@ liveStatusBox.Position = UDim2.new(0, 6, 1, -42)
 liveStatusBox.BackgroundColor3 = COLOR_BG
 liveStatusBox.BorderSizePixel = 0
 liveStatusBox.Font = Enum.Font.GothamBold
-liveStatusBox.Text = "STATUS: STOPPED"
+liveStatusBox.Text = "STAND: OFF"
 liveStatusBox.TextSize = 8
 liveStatusBox.TextColor3 = COLOR_MUTED
 liveStatusBox.Parent = rightPanel
@@ -633,7 +700,7 @@ shuffleBtn.Activated:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- 6. PASTE MODAL WITH RIG MISMATCH DETECTION
+-- 7. PASTE MODAL WITH RIG MISMATCH GUARD
 --------------------------------------------------------------------------------
 
 local pasteModal = Instance.new("Frame")
@@ -728,7 +795,7 @@ pasteBtn.Activated:Connect(function()
 end)
 
 confirmPasteBtn.Activated:Connect(function()
-	local pJoints, sJoints, stance, poseRig = parseUnifiedTable(codeBox.Text)
+	local pJoints, sJoints, poseRig = parseUnifiedTable(codeBox.Text)
 	local pCount = 0
 	for _ in pairs(pJoints) do pCount = pCount + 1 end
 
@@ -738,13 +805,9 @@ confirmPasteBtn.Activated:Connect(function()
 		return
 	end
 
-	-- Rig Mismatch Verification
-	local char = player.Character
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	local actualRig = (hum and hum.RigType == Enum.HumanoidRigType.R15) and "R15" or "R6"
-
-	if poseRig ~= actualRig then
-		confirmPasteBtn.Text = string.format("⚠️ MISMATCH: POSE IS %s, AVATAR IS %s!", poseRig, actualRig)
+	-- Rig Check: Strictly R6
+	if poseRig ~= "R6" then
+		confirmPasteBtn.Text = "⚠️ MISMATCH: POSE IS NOT R6!"
 		confirmPasteBtn.BackgroundColor3 = COLOR_DANGER
 		task.delay(2.5, function()
 			confirmPasteBtn.Text = "LOAD INTO PLAYLIST"
@@ -757,8 +820,7 @@ confirmPasteBtn.Activated:Connect(function()
 	table.insert(playlist, {
 		Name = poseName,
 		PlayerJoints = pJoints,
-		StandJoints = sJoints, -- If empty, fallback mirrors player
-		Stance = stance,
+		StandJoints = sJoints,
 		RigType = poseRig,
 	})
 	pasteModal.Visible = false
@@ -768,7 +830,7 @@ confirmPasteBtn.Activated:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- 7. STAND SUMMON & "ゴゴゴ" MENACING GLYPHS FX
+-- 8. CINEMATIC VFX (SHOCKWAVE, SCREEN SHAKE, GLYPHS)
 --------------------------------------------------------------------------------
 
 local function spawnGlyph(position)
@@ -810,47 +872,154 @@ local function spawnGlyph(position)
 	tween.Completed:Connect(function() part:Destroy() end)
 end
 
-local function spawnStandEntity()
-	if standEntity then standEntity:Destroy() standEntity = nil end
+-- Ground Shockwave Ring
+local function triggerRoarShockwave(position)
+	local shockwave = Instance.new("Part")
+	shockwave.Name = "RoarShockwaveRing"
+	shockwave.Shape = Enum.PartType.Cylinder
+	shockwave.Size = Vector3.new(0.2, 1, 1)
+	shockwave.CFrame = CFrame.new(position - Vector3.new(0, 2.5, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	shockwave.Material = Enum.Material.Neon
+	shockwave.Color = Color3.fromRGB(190, 130, 255)
+	shockwave.Transparency = 0.2
+	shockwave.CanCollide = false
+	shockwave.Anchored = true
+	shockwave.Parent = workspace
+
+	local expandTween = TweenService:Create(
+		shockwave,
+		TweenInfo.new(0.65, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+		{ Size = Vector3.new(0.2, 28, 28), Transparency = 1 }
+	)
+	expandTween:Play()
+	expandTween.Completed:Connect(function() shockwave:Destroy() end)
+end
+
+-- Screen Shake Loop
+task.spawn(function()
+	while true do
+		RunService.RenderStepped:Wait()
+		if isShaking and shakeIntensity > 0 then
+			local rx = (math.random() - 0.5) * shakeIntensity
+			local ry = (math.random() - 0.5) * shakeIntensity
+			local rz = (math.random() - 0.5) * shakeIntensity
+			camera.CFrame = camera.CFrame * CFrame.Angles(math.rad(rx), math.rad(ry), math.rad(rz))
+		end
+	end
+end)
+
+local function triggerScreenShake(duration, intensity)
+	shakeIntensity = intensity or 0.75
+	isShaking = true
+	task.delay(duration or 0.45, function()
+		isShaking = false
+		shakeIntensity = 0
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- 9. STAND GENERATOR (CLEAN SOLID WHITE, ZERO ACCESSORIES)
+--------------------------------------------------------------------------------
+
+local function spawnCleanStandModel(originCF)
+	if standModel then standModel:Destroy() standModel = nil end
+
 	local char = player.Character
 	if not char then return end
 
 	char.Archivable = true
-	local stand = char:Clone()
+	local clone = char:Clone()
 	char.Archivable = false
-	stand.Name = "GhostStandEntity"
+	clone.Name = "CleanStandEntity"
 
-	for _, p in ipairs(stand:GetDescendants()) do
-		if p:IsA("BasePart") then
-			p.CanCollide = false
-			p.Anchored = true
-			p.Material = Enum.Material.ForceField
-			p.Color = COLOR_STAND
-			p.Transparency = 0.35
-		elseif p:IsA("Script") or p:IsA("LocalScript") or p:IsA("Sound") then
-			p:Destroy()
+	-- Delete all hats, clothes, and face decals
+	for _, desc in ipairs(clone:GetDescendants()) do
+		if desc:IsA("Accessory") or desc:IsA("Shirt") or desc:IsA("Pants") or desc:IsA("ShirtGraphic") or desc:IsA("Decal") or desc:IsA("CharacterMesh") then
+			desc:Destroy()
 		end
 	end
 
-	stand.Parent = workspace
-	standEntity = stand
+	-- Make 6 visual limbs solid white
+	local visualLimbs = { "Head", "Torso", "Right Arm", "Left Arm", "Right Leg", "Left Leg" }
+	for _, limbName in ipairs(visualLimbs) do
+		local p = clone:FindFirstChild(limbName)
+		if p and p:IsA("BasePart") then
+			p.Material = Enum.Material.SmoothPlastic
+			p.Color = Color3.fromRGB(255, 255, 255)
+			p.Transparency = 0
+			p.CanCollide = false
+			p.Anchored = false
+		end
+	end
+
+	-- STRICTLY LOCK HumanoidRootPart to INVISIBLE
+	local root = clone:FindFirstChild("HumanoidRootPart")
+	if root then
+		root.Transparency = 1
+		root.CanCollide = false
+		root.Anchored = true
+		root.CFrame = originCF
+	end
+
+	local hum = clone:FindFirstChildOfClass("Humanoid")
+	if hum then
+		hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+		hum.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+		hum.PlatformStand = true
+	end
+
+	clone.Parent = workspace
+	standModel = clone
 end
 
-local function removeStandEntity()
-	if standEntity then standEntity:Destroy() standEntity = nil end
+local function removeStandModel()
+	if standModel then
+		standModel:Destroy()
+		standModel = nil
+	end
 end
 
 --------------------------------------------------------------------------------
--- 8. PLAYBACK CONTROLLER & GROUNDED BREATHING
+-- 10. PLAYBACK & CUTSCENE CONTROLLER
 --------------------------------------------------------------------------------
+
+local function summonStandPassive()
+	if isStandSummoned then return end
+	local char = player.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not root then return end
+
+	isStandSummoned = true
+	standSummonBtn.Text = "🦾 STAND: ON"
+	standSummonBtn.BackgroundColor3 = COLOR_ACTIVE
+	minStandBtn.BackgroundColor3 = COLOR_STAND
+	minStandBtn.TextColor3 = COLOR_BG
+
+	spawnCleanStandModel(root.CFrame)
+	cutsceneStage = "PassiveIdle"
+	liveStatusBox.Text = "STAND: HOVERING"
+	minStatusText.Text = "STAND IDLE"
+end
+
+local function dismissStandPassive()
+	if not isStandSummoned then return end
+	isStandSummoned = false
+	standSummonBtn.Text = "🦾 STAND: OFF"
+	standSummonBtn.BackgroundColor3 = COLOR_DARK
+	minStandBtn.BackgroundColor3 = COLOR_DARK
+	minStandBtn.TextColor3 = COLOR_STAND
+
+	removeStandModel()
+	cutsceneStage = "None"
+	liveStatusBox.Text = "STAND: DISMISSED"
+	minStatusText.Text = "STAND: OFF"
+end
 
 local function startPlayback()
 	if #playlist == 0 then return end
-	isPlaying = true
+	isPosing = true
 	currentPoseIndex = 1
 	lastPoseIndex = 1
-	transitionStartTime = os.clock()
-	lastSwitchTime = os.clock()
 
 	playBtn.Text = "⏹ STOP"
 	playBtn.BackgroundColor3 = Color3.fromRGB(60, 20, 25)
@@ -862,24 +1031,56 @@ local function startPlayback()
 	local root = char and char:FindFirstChild("HumanoidRootPart")
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
 
-	if char then
-		for jointName, _ in pairs(playlist[1].PlayerJoints) do
-			local joint = findJointByName(char, jointName)
-			startPlayerCF[jointName] = (joint and joint.Transform) or CFrame.identity
-			activePlayerCF[jointName] = startPlayerCF[jointName]
-		end
-	end
-
-	-- Freeze in place
+	-- Freeze human in place
 	if root then root.Anchored = true end
 	if hum then hum.WalkSpeed = 0; hum.JumpPower = 0 end
 
-	spawnStandEntity()
+	-- Snapshot human starting joints
+	for jointName, _ in pairs(HUMAN_SUMMON_IDLE) do
+		local j = findJoint(char, jointName)
+		startPlayerCF[jointName] = (j and j.Transform) or CFrame.identity
+		activePlayerCF[jointName] = startPlayerCF[jointName]
+	end
+
+	-- SMART CUTSCENE SKIP LOGIC
+	if isStandSummoned and standModel then
+		-- Stand is ALREADY out: SKIP emergence, start directly at Roar Wind-Up!
+		cutsceneStage = "WindUp"
+		cutsceneStartTime = os.clock()
+
+		for jointName, _ in pairs(STAND_WINDUP_POSE) do
+			local j = findJoint(standModel, jointName)
+			startStandCF[jointName] = (j and j.Transform) or CFrame.identity
+			activeStandCF[jointName] = startStandCF[jointName]
+		end
+		liveStatusBox.Text = "STAND: WIND-UP"
+	else
+		-- Stand is NOT out: Play full emergence from spine
+		isStandSummoned = true
+		standSummonBtn.Text = "🦾 STAND: ON"
+		standSummonBtn.BackgroundColor3 = COLOR_ACTIVE
+		minStandBtn.BackgroundColor3 = COLOR_STAND
+		minStandBtn.TextColor3 = COLOR_BG
+
+		spawnCleanStandModel(root.CFrame)
+		cutsceneStage = "Emerge"
+		cutsceneStartTime = os.clock()
+
+		for jointName, _ in pairs(STAND_IDLE_POSE) do
+			local j = findJoint(standModel, jointName)
+			startStandCF[jointName] = (j and j.Transform) or CFrame.identity
+			activeStandCF[jointName] = startStandCF[jointName]
+		end
+		liveStatusBox.Text = "STAND: EMERGING"
+	end
+
 	refreshPlaylistUI()
 end
 
 stopPlayback = function()
-	isPlaying = false
+	isPosing = false
+	cutsceneStage = "None"
+
 	playBtn.Text = "▶ PLAY"
 	playBtn.BackgroundColor3 = COLOR_LIGHT_DARK
 	playBtn.TextColor3 = COLOR_ACCENT
@@ -893,6 +1094,7 @@ stopPlayback = function()
 	local root = char and char:FindFirstChild("HumanoidRootPart")
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
 
+	-- Unfreeze player
 	if root then root.Anchored = false end
 	if hum then hum.WalkSpeed = 16; hum.JumpPower = 50 end
 
@@ -901,126 +1103,280 @@ stopPlayback = function()
 		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do track:AdjustSpeed(1) end
 	end
 
-	-- Reset all joints to clean identity
+	-- Reset player joints back to neutral
 	if char then
 		for _, desc in ipairs(char:GetDescendants()) do
-			if desc:IsA("Motor6D") then
-				desc.Transform = CFrame.identity
-			end
+			if desc:IsA("Motor6D") then desc.Transform = CFrame.identity end
 		end
 	end
 
-	removeStandEntity()
+	-- If stand was summoned just for playback, dismiss it
+	dismissStandPassive()
 	refreshPlaylistUI()
 end
 
+standSummonBtn.Activated:Connect(function()
+	if isStandSummoned then
+		if isPosing then stopPlayback() else dismissStandPassive() end
+	else
+		summonStandPassive()
+	end
+end)
+
+minStandBtn.Activated:Connect(function()
+	if isStandSummoned then
+		if isPosing then stopPlayback() else dismissStandPassive() end
+	else
+		summonStandPassive()
+	end
+end)
+
 playBtn.Activated:Connect(function()
-	if isPlaying then stopPlayback() else startPlayback() end
+	if isPosing then stopPlayback() else startPlayback() end
 end)
 
 minPlayBtn.Activated:Connect(function()
-	if isPlaying then stopPlayback() else startPlayback() end
+	if isPosing then stopPlayback() else startPlayback() end
 end)
 
--- Physics Loop: Dual Rig Interpolation & Grounded Breathing
+--------------------------------------------------------------------------------
+-- 11. ENGINE LOOP: CUTSCENE, HOVERING, & GROUNDED BREATHING
+--------------------------------------------------------------------------------
+
 RunService.Stepped:Connect(function()
 	local char = player.Character
-	if not char or not isPlaying or #playlist == 0 then return end
+	if not char then return end
 
 	local root = char:FindFirstChild("HumanoidRootPart")
-	local hum = char:FindFirstChildOfClass("Humanoid")
-	local animator = hum and hum:FindFirstChildOfClass("Animator")
-
-	if animator then
-		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do track:AdjustSpeed(0) end
-	end
+	if not root then return end
 
 	local now = os.clock()
 
-	-- "ゴゴゴ" Glyphs
-	if now - lastGlyphTime >= 0.35 and root then
+	-- Subtle Grounded Breathing (Chest & Neck ONLY)
+	local chestBreath = math.sin(now * 2.2) * 0.02
+	local neckDrift = math.sin(now * 1.5) * 0.015
+
+	-- Stand Hovering Physics (Subtle Vertical Sine Bobbing)
+	local hoverBobY = math.sin(now * 1.8) * 0.22
+
+	-- Menacing Glyphs during posing
+	if isPosing and (now - lastGlyphTime >= 0.35) then
 		lastGlyphTime = now
 		spawnGlyph(root.Position)
 	end
 
-	-- Cycle/Shuffle Timer
-	if playbackMode ~= "AuraFarm" and #playlist >= 2 then
-		if now - lastSwitchTime >= switchInterval then
-			lastSwitchTime = now
-			transitionStartTime = now
-
-			for jointName, cf in pairs(activePlayerCF) do startPlayerCF[jointName] = cf end
-			for jointName, cf in pairs(activeStandCF) do startStandCF[jointName] = cf end
-
-			if playbackMode == "Cycle" then
-				currentPoseIndex = (currentPoseIndex % #playlist) + 1
-			elseif playbackMode == "Shuffle" then
-				local nextIdx = currentPoseIndex
-				repeat nextIdx = math.random(1, #playlist) until nextIdx ~= lastPoseIndex
-				currentPoseIndex = nextIdx
-				lastPoseIndex = nextIdx
-			end
-			refreshPlaylistUI()
+	----------------------------------------------------------------------------
+	-- A. CUTSCENE STAGE CONTROLLER
+	----------------------------------------------------------------------------
+	if isPosing then
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		local animator = hum and hum:FindFirstChildOfClass("Animator")
+		if animator then
+			for _, track in ipairs(animator:GetPlayingAnimationTracks()) do track:AdjustSpeed(0) end
 		end
-	end
 
-	local item = playlist[currentPoseIndex]
-	if not item then return end
+		local cutsceneElapsed = now - cutsceneStartTime
 
-	liveStatusBox.Text = string.format("[%d/%d] %s", currentPoseIndex, #playlist, item.Name)
-	minStatusText.Text = string.format("%d/%d: %s", currentPoseIndex, #playlist, item.Name)
-	minStatusText.TextColor3 = COLOR_ACCENT
+		if cutsceneStage == "Emerge" then
+			-- Stage 1: Slide from spine to shoulder holding STAND_IDLE_POSE (0.4s)
+			local alpha = math.clamp(cutsceneElapsed / 0.40, 0, 1)
+			local ease = alpha * alpha * (3 - 2 * alpha)
 
-	local elapsed = now - transitionStartTime
-	local rawAlpha = math.clamp(elapsed / TRANSITION_TIME, 0, 1)
-	local smoothAlpha = rawAlpha * rawAlpha * (3 - 2 * rawAlpha)
+			if standModel then
+				local sRoot = standModel:FindFirstChild("HumanoidRootPart")
+				if sRoot then
+					local currentOffset = Vector3.zero:Lerp(BASE_SHOULDER_OFFSET, ease)
+					sRoot.CFrame = root.CFrame * CFrame.new(currentOffset + Vector3.new(0, hoverBobY, 0))
+				end
+			end
 
-	-- Grounded Breathing: ONLY modulates shoulders & neck
-	local chestBreath = math.sin(now * 2.2) * 0.02
-	local neckDrift = math.sin(now * 1.5) * 0.015
+			-- Human holds Summon Idle
+			for jName, targetCF in pairs(HUMAN_SUMMON_IDLE) do
+				local j = findJoint(char, jName)
+				if j then j.Transform = targetCF end
+			end
 
-	-- 1. Apply to Human Avatar
-	for jointName, targetCF in pairs(item.PlayerJoints) do
-		local joint = findJointByName(char, jointName)
-		if joint then
-			local startCF = startPlayerCF[jointName] or targetCF
-			local blendedCF = startCF:Lerp(targetCF, smoothAlpha)
-			activePlayerCF[jointName] = blendedCF
+			-- Stand holds Stand Idle Pose
+			for jName, targetCF in pairs(STAND_IDLE_POSE) do
+				local j = findJoint(standModel, jName)
+				if j then j.Transform = targetCF end
+			end
 
-			if jointName == "Neck" then
-				joint.Transform = blendedCF * CFrame.Angles(neckDrift, 0, 0)
-			elseif jointName:find("Shoulder") then
-				joint.Transform = blendedCF * CFrame.new(0, chestBreath, 0)
-			else
-				joint.Transform = blendedCF
+			if alpha >= 1 then
+				cutsceneStage = "WindUp"
+				cutsceneStartTime = now
+				liveStatusBox.Text = "STAND: WIND-UP"
+			end
+
+		elseif cutsceneStage == "WindUp" then
+			-- Stage 2: Roar Anticipation (0.25s)
+			local alpha = math.clamp(cutsceneElapsed / 0.25, 0, 1)
+			local ease = alpha * alpha * (3 - 2 * alpha)
+
+			if standModel then
+				local sRoot = standModel:FindFirstChild("HumanoidRootPart")
+				if sRoot then
+					sRoot.CFrame = root.CFrame * CFrame.new(BASE_SHOULDER_OFFSET + Vector3.new(0, hoverBobY, 0))
+				end
+			end
+
+			for jName, targetCF in pairs(HUMAN_SUMMON_IDLE) do
+				local j = findJoint(char, jName)
+				if j then j.Transform = targetCF end
+			end
+
+			for jName, targetCF in pairs(STAND_WINDUP_POSE) do
+				local j = findJoint(standModel, jName)
+				if j then
+					local startCF = STAND_IDLE_POSE[jName] or targetCF
+					j.Transform = startCF:Lerp(targetCF, ease)
+				end
+			end
+
+			if alpha >= 1 then
+				cutsceneStage = "Roar"
+				cutsceneStartTime = now
+				liveStatusBox.Text = "STAND: ROARING!"
+				-- TRIGGER ROAR CINEMATICS
+				triggerScreenShake(0.55, 0.9)
+				triggerRoarShockwave(root.Position)
+			end
+
+		elseif cutsceneStage == "Roar" then
+			-- Stage 3: Roar Burst with screen shake & shockwave (0.50s)
+			local alpha = math.clamp(cutsceneElapsed / 0.50, 0, 1)
+			local ease = alpha * alpha * (3 - 2 * alpha)
+
+			if standModel then
+				local sRoot = standModel:FindFirstChild("HumanoidRootPart")
+				if sRoot then
+					sRoot.CFrame = root.CFrame * CFrame.new(BASE_SHOULDER_OFFSET + Vector3.new(0, hoverBobY, 0))
+				end
+			end
+
+			for jName, targetCF in pairs(HUMAN_SUMMON_IDLE) do
+				local j = findJoint(char, jName)
+				if j then j.Transform = targetCF end
+			end
+
+			for jName, targetCF in pairs(STAND_ROAR_POSE) do
+				local j = findJoint(standModel, jName)
+				if j then
+					local startCF = STAND_WINDUP_POSE[jName] or targetCF
+					j.Transform = startCF:Lerp(targetCF, ease)
+				end
+			end
+
+			if alpha >= 1 then
+				-- Cutscene Finished -> Begin Main Playlist
+				cutsceneStage = "Playing"
+				lastSwitchTime = now
+				poseTransitionTime = now
+
+				for jName, _ in pairs(playlist[1].PlayerJoints) do
+					local j = findJoint(char, jName)
+					startPlayerCF[jName] = (j and j.Transform) or CFrame.identity
+					activePlayerCF[jName] = startPlayerCF[jName]
+				end
+			end
+
+		elseif cutsceneStage == "Playing" then
+			-- Stage 4: Playing Main Playlist Poses
+			if playbackMode ~= "AuraFarm" and #playlist >= 2 then
+				if now - lastSwitchTime >= switchInterval then
+					lastSwitchTime = now
+					poseTransitionTime = now
+
+					for jName, cf in pairs(activePlayerCF) do startPlayerCF[jName] = cf end
+					for jName, cf in pairs(activeStandCF) do startStandCF[jName] = cf end
+
+					if playbackMode == "Cycle" then
+						currentPoseIndex = (currentPoseIndex % #playlist) + 1
+					elseif playbackMode == "Shuffle" then
+						local nextIdx = currentPoseIndex
+						repeat nextIdx = math.random(1, #playlist) until nextIdx ~= lastPoseIndex
+						currentPoseIndex = nextIdx
+						lastPoseIndex = nextIdx
+					end
+					refreshPlaylistUI()
+				end
+			end
+
+			local item = playlist[currentPoseIndex]
+			if item then
+				liveStatusBox.Text = string.format("[%d/%d] %s", currentPoseIndex, #playlist, item.Name)
+				minStatusText.Text = string.format("%d/%d: %s", currentPoseIndex, #playlist, item.Name)
+
+				local elapsed = now - poseTransitionTime
+				local rawAlpha = math.clamp(elapsed / 0.30, 0, 1)
+				local smoothAlpha = rawAlpha * rawAlpha * (3 - 2 * rawAlpha)
+
+				-- Position Stand at shoulder
+				if standModel then
+					local sRoot = standModel:FindFirstChild("HumanoidRootPart")
+					if sRoot then
+						sRoot.CFrame = root.CFrame * CFrame.new(BASE_SHOULDER_OFFSET + Vector3.new(0, hoverBobY, 0))
+					end
+				end
+
+				-- 1. Apply to Human Avatar
+				for jName, targetCF in pairs(item.PlayerJoints) do
+					local j = findJoint(char, jName)
+					if j then
+						local startCF = startPlayerCF[jName] or targetCF
+						local blended = startCF:Lerp(targetCF, smoothAlpha)
+						activePlayerCF[jName] = blended
+
+						if jName == "Neck" then
+							j.Transform = blended * CFrame.Angles(neckDrift, 0, 0)
+						elseif jName:find("Shoulder") then
+							j.Transform = blended * CFrame.new(0, chestBreath, 0)
+						else
+							j.Transform = blended
+						end
+					end
+				end
+
+				-- 2. Apply to Stand (Auto-copy fallback if StandJoints is empty)
+				local standSource = (next(item.StandJoints) ~= nil) and item.StandJoints or item.PlayerJoints
+				for jName, targetCF in pairs(standSource) do
+					local j = findJoint(standModel, jName)
+					if j then
+						local startCF = startStandCF[jName] or targetCF
+						local blended = startCF:Lerp(targetCF, smoothAlpha)
+						activeStandCF[jName] = blended
+
+						if jName == "Neck" then
+							j.Transform = blended * CFrame.Angles(neckDrift, 0, 0)
+						elseif jName:find("Shoulder") then
+							j.Transform = blended * CFrame.new(0, chestBreath, 0)
+						else
+							j.Transform = blended
+						end
+					end
+				end
 			end
 		end
-	end
 
-	-- 2. Apply to Stand Entity
-	if standEntity and root then
-		local sRoot = standEntity:FindFirstChild("HumanoidRootPart")
+	----------------------------------------------------------------------------
+	-- B. PASSIVE HOVER MODE (Stand active while walking freely)
+	----------------------------------------------------------------------------
+	elseif isStandSummoned and standModel then
+		local sRoot = standModel:FindFirstChild("HumanoidRootPart")
 		if sRoot then
-			local offset = (item.Stance == "EMBRACE") and CFrame.new(0, 0.1, 0.65) or CFrame.new(2.5, 1.5, 2.5)
-			sRoot.CFrame = root.CFrame * offset
+			sRoot.CFrame = root.CFrame * CFrame.new(BASE_SHOULDER_OFFSET + Vector3.new(0, hoverBobY, 0))
 		end
 
-		-- Fallback: If StandJoints is empty, mirror player pose
-		local standSource = (next(item.StandJoints) ~= nil) and item.StandJoints or item.PlayerJoints
-
-		for jointName, targetCF in pairs(standSource) do
-			local joint = findJointByName(standEntity, jointName)
-			if joint then
-				local startCF = startStandCF[jointName] or targetCF
-				local blendedCF = startCF:Lerp(targetCF, smoothAlpha)
-				activeStandCF[jointName] = blendedCF
-
-				if jointName == "Neck" then
-					joint.Transform = blendedCF * CFrame.Angles(neckDrift, 0, 0)
-				elseif jointName:find("Shoulder") then
-					joint.Transform = blendedCF * CFrame.new(0, chestBreath, 0)
+		-- Hold Stand Idle Pose with breathing wave
+		for jName, targetCF in pairs(STAND_IDLE_POSE) do
+			local j = findJoint(standModel, jName)
+			if j then
+				if jName == "Neck" then
+					j.Transform = targetCF * CFrame.Angles(neckDrift, 0, 0)
+				elseif jName:find("Shoulder") then
+					j.Transform = targetCF * CFrame.new(0, chestBreath, 0)
 				else
-					joint.Transform = blendedCF
+					j.Transform = targetCF
 				end
 			end
 		end
