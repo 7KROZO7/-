@@ -7,7 +7,7 @@ local UserInputService = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 
 --------------------------------------------------------------------------------
--- 1. PALETTE & THEME
+-- 1. THEME & PALETTES
 --------------------------------------------------------------------------------
 
 local COLOR_BG = Color3.fromRGB(15, 17, 22)
@@ -21,7 +21,7 @@ local COLOR_TEXT = Color3.fromRGB(240, 240, 240)
 local COLOR_MUTED = Color3.fromRGB(115, 120, 135)
 
 --------------------------------------------------------------------------------
--- 2. SPECIFIC 6-LIMB R6 DEFINITION
+-- 2. RIG DEFINITION & DUAL MEMORY
 --------------------------------------------------------------------------------
 
 local R6_JOINTS = {
@@ -62,12 +62,7 @@ local function initPoseData()
 	standPoseData = {}
 	for _, def in ipairs(R6_JOINTS) do
 		humanPoseData[def.JointName] = { Pos = Vector3.zero, Rot = Vector3.zero }
-		-- Default Stand root offset slightly behind the player
-		if def.JointName == "RootJoint" then
-			standPoseData[def.JointName] = { Pos = Vector3.new(2.2, 1.2, 2.0), Rot = Vector3.zero }
-		else
-			standPoseData[def.JointName] = { Pos = Vector3.zero, Rot = Vector3.zero }
-		end
+		standPoseData[def.JointName] = { Pos = Vector3.zero, Rot = Vector3.zero }
 	end
 	undoStack = {}
 	redoStack = {}
@@ -83,7 +78,7 @@ local function findJoint(char, def)
 end
 
 --------------------------------------------------------------------------------
--- 3. SPECIFIC STAND MODEL GENERATOR (CLEAN SOLID WHITE, ZERO ACCESSORIES)
+-- 3. CLEAN STAND SPAWNER (FLOATS AT SHOULDER, UNANCHORED LIMBS)
 --------------------------------------------------------------------------------
 
 local function spawnCleanStandModel(originCF)
@@ -97,36 +92,35 @@ local function spawnCleanStandModel(originCF)
 	char.Archivable = false
 	clone.Name = "CleanStandPreview"
 
-	-- Delete all hats, hairs, clothing, and face decals from the Stand
+	-- Delete all accessories and clothing
 	for _, desc in ipairs(clone:GetDescendants()) do
 		if desc:IsA("Accessory") or desc:IsA("Shirt") or desc:IsA("Pants") or desc:IsA("ShirtGraphic") or desc:IsA("Decal") or desc:IsA("CharacterMesh") then
 			desc:Destroy()
 		end
 	end
 
-	-- Specifically target only the 6 core visual limbs
+	-- Limbs MUST be Anchored = false so Motor6Ds can move them into the air!
 	local visualLimbs = { "Head", "Torso", "Right Arm", "Left Arm", "Right Leg", "Left Leg" }
 	for _, limbName in ipairs(visualLimbs) do
 		local p = clone:FindFirstChild(limbName)
 		if p and p:IsA("BasePart") then
 			p.Material = Enum.Material.SmoothPlastic
-			p.Color = Color3.fromRGB(255, 255, 255) -- Pure clean solid white
+			p.Color = Color3.fromRGB(255, 255, 255)
 			p.Transparency = 0
 			p.CanCollide = false
-			p.Anchored = true
+			p.Anchored = false
 		end
 	end
 
-	-- STRICTLY LOCK HumanoidRootPart to INVISIBLE (Prevents the giant box!)
+	-- ONLY the RootPart is anchored, positioned up at the shoulder
 	local root = clone:FindFirstChild("HumanoidRootPart")
 	if root then
 		root.Transparency = 1
 		root.CanCollide = false
 		root.Anchored = true
-		root.CFrame = originCF
+		root.CFrame = originCF * CFrame.new(2.2, 1.2, 1.8)
 	end
 
-	-- Disable humanoid physics conflicts
 	local hum = clone:FindFirstChildOfClass("Humanoid")
 	if hum then
 		hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
@@ -221,7 +215,7 @@ mainStroke.Thickness = 1.6
 mainStroke.Color = COLOR_ACCENT
 mainStroke.Parent = mainWindow
 
--- Minimized Pill (Upper thumb zone: Y = 0.52)
+-- Minimized Pill (Upper thumb reach: Y = 0.52)
 local minPill = Instance.new("Frame")
 minPill.Name = "EditorMinPill"
 minPill.Size = UDim2.fromOffset(130, 36)
@@ -295,7 +289,7 @@ local hCorner = Instance.new("UICorner")
 hCorner.CornerRadius = UDim.new(0, 8)
 hCorner.Parent = header
 
--- Fixed Window Dragging (Moves mainWindow cleanly!)
+-- Fixed Window Dragging
 local winDragging = false
 local winDragStart = Vector2.zero
 local winStartPos = UDim2.new()
@@ -409,10 +403,9 @@ local lsLayout = Instance.new("UIListLayout")
 lsLayout.Padding = UDim.new(0, 3)
 lsLayout.Parent = limbScroll
 
--- Specific White Outline (Fill Transparency = 1)
 local limbHighlight = Instance.new("Highlight")
 limbHighlight.Name = "EditorLimbHighlight"
-limbHighlight.FillTransparency = 1 -- ZERO FILL
+limbHighlight.FillTransparency = 1
 limbHighlight.OutlineColor = Color3.fromRGB(255, 255, 255)
 limbHighlight.OutlineTransparency = 0
 limbHighlight.Enabled = false
@@ -576,7 +569,6 @@ local vdc = Instance.new("UICorner")
 vdc.CornerRadius = UDim.new(0, 4)
 vdc.Parent = valueDisplay
 
--- Infinite Scrubber Box
 local scrubBox = Instance.new("Frame")
 scrubBox.Name = "InfiniteScrubber"
 scrubBox.Size = UDim2.new(1, -12, 0, 44)
@@ -747,7 +739,7 @@ posTabBtn.Activated:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- 8. TARGET SWITCHER (HUMAN / STAND)
+-- 8. TARGET SWITCHER: EDIT REAL HUMAN OR STAND DUMMY
 --------------------------------------------------------------------------------
 
 targetSwitchBtn.Activated:Connect(function()
@@ -759,7 +751,7 @@ targetSwitchBtn.Activated:Connect(function()
 		targetSwitchBtn.Text = "🦾 STAND"
 		targetSwitchBtn.TextColor3 = COLOR_STAND
 
-		-- Spawns the clean R6 Stand model next to you (does NOT touch your player avatar!)
+		-- Spawns the clean R6 Stand model directly floating at your shoulder!
 		if root then
 			spawnCleanStandModel(root.CFrame)
 		end
@@ -825,7 +817,6 @@ local function fullRestore()
 		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do track:AdjustSpeed(1) end
 	end
 
-	-- Restore player's 6 joints to neutral
 	for _, def in ipairs(R6_JOINTS) do
 		local joint = findJoint(char, def)
 		if joint then joint.Transform = CFrame.identity end
@@ -1034,7 +1025,6 @@ RunService.Stepped:Connect(function()
 	local char = player.Character
 	if not char then return end
 
-	-- Freeze active player animations
 	local hum = char:FindFirstChildOfClass("Humanoid")
 	local animator = hum and hum:FindFirstChildOfClass("Animator")
 	if animator then
@@ -1052,15 +1042,16 @@ RunService.Stepped:Connect(function()
 		end
 	end
 
-	-- 2. Apply Stand Poses specifically to Stand Model
+	-- 2. Apply Stand Poses and keep it floating right at your shoulder!
 	if standModel and standModel.Parent then
 		local pRoot = char:FindFirstChild("HumanoidRootPart")
 		local sRoot = standModel:FindFirstChild("HumanoidRootPart")
 
-		-- Position Stand relative to player's root using RootJoint's X, Y, Z
 		if pRoot and sRoot then
-			local rootOffset = standPoseData["RootJoint"] and standPoseData["RootJoint"].Pos or Vector3.new(2.2, 1.2, 2.0)
-			sRoot.CFrame = pRoot.CFrame * CFrame.new(rootOffset)
+			-- Fixed over-shoulder floating position (2.2 studs right, 1.2 studs up, 1.8 studs back)
+			local baseShoulder = Vector3.new(2.2, 1.2, 1.8)
+			local userOffset = standPoseData["RootJoint"] and standPoseData["RootJoint"].Pos or Vector3.zero
+			sRoot.CFrame = pRoot.CFrame * CFrame.new(baseShoulder + userOffset)
 		end
 
 		for _, def in ipairs(R6_JOINTS) do
