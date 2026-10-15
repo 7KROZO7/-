@@ -8,7 +8,7 @@ local TweenService = game:GetService("TweenService")
 local player = Players.LocalPlayer
 
 --------------------------------------------------------------------------------
--- 1. PALETTE & THEME
+-- 1. THEME & PALETTES
 --------------------------------------------------------------------------------
 
 local COLOR_BG = Color3.fromRGB(15, 17, 22)
@@ -23,33 +23,44 @@ local COLOR_MUTED = Color3.fromRGB(115, 120, 135)
 local COLOR_DANGER = Color3.fromRGB(240, 80, 80)
 
 --------------------------------------------------------------------------------
--- 2. STATE & UNIFIED PARSER
+-- 2. STATE & PARSER
 --------------------------------------------------------------------------------
 
-local playlist = {} -- Empty by default
+local playlist = {} -- Empty playlist by default
 
 local function toCFrame(pos, rot)
 	return CFrame.new(pos) * CFrame.fromEulerAnglesXYZ(math.rad(rot.X), math.rad(rot.Y), math.rad(rot.Z))
 end
 
--- Parses unified paired tables containing PlayerJoints, StandJoints, and Stance
+-- Universal Motor6D Finder (Works across both R6 and R15 rigs)
+local function findJointByName(char, jointName)
+	for _, desc in ipairs(char:GetDescendants()) do
+		if desc:IsA("Motor6D") and desc.Name == jointName then
+			return desc
+		end
+	end
+	return nil
+end
+
 local function parseUnifiedTable(text)
 	local function extractJoints(block)
 		local joints = {}
+		if not block then return joints end
 		for jointName, px, py, pz, rx, ry, rz in block:gmatch('%["([^"]+)"%]%s*=%s*%{%s*Pos%s*=%s*Vector3%.new%(([%d%.%-]+)%s*,%s*([%d%.%-]+)%s*,%s*([%d%.%-]+)%)%s*,%s*Rot%s*=%s*Vector3%.new%(([%d%.%-]+)%s*,%s*([%d%.%-]+)%s*,%s*([%d%.%-]+)%)') do
 			joints[jointName] = toCFrame(Vector3.new(tonumber(px) or 0, tonumber(py) or 0, tonumber(pz) or 0), Vector3.new(tonumber(rx) or 0, tonumber(ry) or 0, tonumber(rz) or 0))
 		end
 		return joints
 	end
 
+	local rigType = text:match('RigType%s*=%s*"([^"]+)"') or "R6"
 	local stance = text:match('Stance%s*=%s*"([^"]+)"') or "SHOULDER"
 	local playerBlock = text:match('PlayerJoints%s*=%s*%{([^%}]+)%}') or text
 	local standBlock = text:match('StandJoints%s*=%s*%{([^%}]+)%}')
 
 	local pJoints = extractJoints(playerBlock)
-	local sJoints = standBlock and extractJoints(standBlock) or {}
+	local sJoints = extractJoints(standBlock)
 
-	return pJoints, sJoints, stance
+	return pJoints, sJoints, stance, rigType
 end
 
 local isPlaying = false
@@ -99,7 +110,7 @@ mainStroke.Thickness = 1.6
 mainStroke.Color = COLOR_ACCENT
 mainStroke.Parent = mainWindow
 
--- Minimized Action Capsule (Starts at Y = 0.65 to prevent overlap with Editor)
+-- Minimized Pill (Starts at Y = 0.65 to prevent overlap with Pose Editor)
 local minCapsule = Instance.new("Frame")
 minCapsule.Name = "MakerMinCapsule"
 minCapsule.Size = UDim2.fromOffset(180, 36)
@@ -156,7 +167,6 @@ local mebc = Instance.new("UICorner")
 mebc.CornerRadius = UDim.new(0, 4)
 mebc.Parent = minExpandBtn
 
--- Dragging for Minimized Capsule
 local function makeCapsuleDraggable(frame)
 	local dragging = false
 	local dragStart = Vector2.zero
@@ -243,7 +253,6 @@ minBtn.Activated:Connect(function()
 	minCapsule.Visible = true
 end)
 
--- Header Dragging
 local hDragging = false
 local hDragStart = Vector2.zero
 local hStartPos = UDim2.new()
@@ -339,7 +348,7 @@ refreshPlaylistUI = function()
 			nameLabel.Position = UDim2.new(0, 6, 0, 0)
 			nameLabel.BackgroundTransparency = 1
 			nameLabel.Font = Enum.Font.GothamBold
-			nameLabel.Text = string.format("%d. %s", idx, item.Name)
+			nameLabel.Text = string.format("[%s] %d. %s", item.RigType or "R6", idx, item.Name)
 			nameLabel.TextSize = 8
 			nameLabel.TextColor3 = (isPlaying and idx == currentPoseIndex) and COLOR_ACCENT or COLOR_TEXT
 			nameLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -624,7 +633,7 @@ shuffleBtn.Activated:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- 6. PASTE MODAL (UNIFIED TABLE INGESTION)
+-- 6. PASTE MODAL WITH RIG MISMATCH DETECTION
 --------------------------------------------------------------------------------
 
 local pasteModal = Instance.new("Frame")
@@ -695,6 +704,22 @@ local cpbc = Instance.new("UICorner")
 cpbc.CornerRadius = UDim.new(0, 4)
 cpbc.Parent = confirmPasteBtn
 
+local pmClose = Instance.new("TextButton")
+pmClose.Size = UDim2.fromOffset(20, 20)
+pmClose.Position = UDim2.new(1, -26, 0, 4)
+pmClose.BackgroundColor3 = COLOR_DARK
+pmClose.BorderSizePixel = 0
+pmClose.Font = Enum.Font.GothamBold
+pmClose.Text = "X"
+pmClose.TextSize = 10
+pmClose.TextColor3 = COLOR_DANGER
+pmClose.ZIndex = 51
+pmClose.Parent = pasteModal
+local pmcc = Instance.new("UICorner")
+pmcc.CornerRadius = UDim.new(0, 4)
+pmcc.Parent = pmClose
+pmClose.Activated:Connect(function() pasteModal.Visible = false end)
+
 pasteBtn.Activated:Connect(function()
 	if #playlist >= 6 then return end
 	codeBox.Text = ""
@@ -703,26 +728,43 @@ pasteBtn.Activated:Connect(function()
 end)
 
 confirmPasteBtn.Activated:Connect(function()
-	local pJoints, sJoints, stance = parseUnifiedTable(codeBox.Text)
+	local pJoints, sJoints, stance, poseRig = parseUnifiedTable(codeBox.Text)
 	local pCount = 0
 	for _ in pairs(pJoints) do pCount = pCount + 1 end
 
-	if pCount > 0 then
-		local poseName = (#nameBox.Text > 0) and nameBox.Text:upper() or ("POSE " .. (#playlist + 1))
-		table.insert(playlist, {
-			Name = poseName,
-			PlayerJoints = pJoints,
-			StandJoints = sJoints, -- If empty, fallback logic will mirror player automatically
-			Stance = stance
-		})
-		pasteModal.Visible = false
-		refreshPlaylistUI()
-		refreshModeButtons()
-		liveStatusBox.Text = "LOADED: " .. poseName
-	else
+	if pCount == 0 then
 		confirmPasteBtn.Text = "ERROR: NO JOINTS FOUND!"
 		task.delay(1.5, function() confirmPasteBtn.Text = "LOAD INTO PLAYLIST" end)
+		return
 	end
+
+	-- Rig Mismatch Verification
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local actualRig = (hum and hum.RigType == Enum.HumanoidRigType.R15) and "R15" or "R6"
+
+	if poseRig ~= actualRig then
+		confirmPasteBtn.Text = string.format("⚠️ MISMATCH: POSE IS %s, AVATAR IS %s!", poseRig, actualRig)
+		confirmPasteBtn.BackgroundColor3 = COLOR_DANGER
+		task.delay(2.5, function()
+			confirmPasteBtn.Text = "LOAD INTO PLAYLIST"
+			confirmPasteBtn.BackgroundColor3 = COLOR_ACCENT
+		end)
+		return
+	end
+
+	local poseName = (#nameBox.Text > 0) and nameBox.Text:upper() or ("POSE " .. (#playlist + 1))
+	table.insert(playlist, {
+		Name = poseName,
+		PlayerJoints = pJoints,
+		StandJoints = sJoints, -- If empty, fallback mirrors player
+		Stance = stance,
+		RigType = poseRig,
+	})
+	pasteModal.Visible = false
+	refreshPlaylistUI()
+	refreshModeButtons()
+	liveStatusBox.Text = "LOADED: " .. poseName
 end)
 
 --------------------------------------------------------------------------------
@@ -749,7 +791,7 @@ local function spawnGlyph(position)
 	lbl.Font = Enum.Font.GothamBold
 	lbl.Text = "ゴ"
 	lbl.TextSize = 24
-	lbl.TextColor3 = Color3.fromRGB(160, 40, 240) -- Deep menacing purple
+	lbl.TextColor3 = Color3.fromRGB(160, 40, 240)
 	lbl.Parent = bb
 
 	local tween = TweenService:Create(
@@ -799,7 +841,7 @@ local function removeStandEntity()
 end
 
 --------------------------------------------------------------------------------
--- 8. PLAYBACK CONTROLLER & GROUNDED BREATHING ENGINE
+-- 8. PLAYBACK CONTROLLER & GROUNDED BREATHING
 --------------------------------------------------------------------------------
 
 local function startPlayback()
@@ -819,17 +861,16 @@ local function startPlayback()
 	local char = player.Character
 	local root = char and char:FindFirstChild("HumanoidRootPart")
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	local torso = char and char:FindFirstChild("Torso")
 
-	if torso then
+	if char then
 		for jointName, _ in pairs(playlist[1].PlayerJoints) do
-			local joint = torso:FindFirstChild(jointName) or (root and root:FindFirstChild(jointName))
+			local joint = findJointByName(char, jointName)
 			startPlayerCF[jointName] = (joint and joint.Transform) or CFrame.identity
 			activePlayerCF[jointName] = startPlayerCF[jointName]
 		end
 	end
 
-	-- Freeze Player in place firmly
+	-- Freeze in place
 	if root then root.Anchored = true end
 	if hum then hum.WalkSpeed = 0; hum.JumpPower = 0 end
 
@@ -851,9 +892,7 @@ stopPlayback = function()
 	local char = player.Character
 	local root = char and char:FindFirstChild("HumanoidRootPart")
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	local torso = char and char:FindFirstChild("Torso")
 
-	-- Unfreeze & restore movement
 	if root then root.Anchored = false end
 	if hum then hum.WalkSpeed = 16; hum.JumpPower = 50 end
 
@@ -862,11 +901,12 @@ stopPlayback = function()
 		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do track:AdjustSpeed(1) end
 	end
 
-	-- Reset player joints to clean neutral
-	if torso then
-		for _, name in ipairs({ "Neck", "RootJoint", "Right Shoulder", "Left Shoulder", "Right Hip", "Left Hip" }) do
-			local joint = torso:FindFirstChild(name) or (root and root:FindFirstChild(name))
-			if joint and joint:IsA("Motor6D") then joint.Transform = CFrame.identity end
+	-- Reset all joints to clean identity
+	if char then
+		for _, desc in ipairs(char:GetDescendants()) do
+			if desc:IsA("Motor6D") then
+				desc.Transform = CFrame.identity
+			end
 		end
 	end
 
@@ -882,13 +922,12 @@ minPlayBtn.Activated:Connect(function()
 	if isPlaying then stopPlayback() else startPlayback() end
 end)
 
--- Physics Pre-Step: Synchronized Dual Interpolation & Grounded Breathing
+-- Physics Loop: Dual Rig Interpolation & Grounded Breathing
 RunService.Stepped:Connect(function()
 	local char = player.Character
 	if not char or not isPlaying or #playlist == 0 then return end
 
 	local root = char:FindFirstChild("HumanoidRootPart")
-	local torso = char:FindFirstChild("Torso")
 	local hum = char:FindFirstChildOfClass("Humanoid")
 	local animator = hum and hum:FindFirstChildOfClass("Animator")
 
@@ -898,13 +937,13 @@ RunService.Stepped:Connect(function()
 
 	local now = os.clock()
 
-	-- Menacing Glyphs
+	-- "ゴゴゴ" Glyphs
 	if now - lastGlyphTime >= 0.35 and root then
 		lastGlyphTime = now
 		spawnGlyph(root.Position)
 	end
 
-	-- Mode Timing & Sequencing
+	-- Cycle/Shuffle Timer
 	if playbackMode ~= "AuraFarm" and #playlist >= 2 then
 		if now - lastSwitchTime >= switchInterval then
 			lastSwitchTime = now
@@ -936,21 +975,21 @@ RunService.Stepped:Connect(function()
 	local rawAlpha = math.clamp(elapsed / TRANSITION_TIME, 0, 1)
 	local smoothAlpha = rawAlpha * rawAlpha * (3 - 2 * rawAlpha)
 
-	-- Grounded Breathing: ONLY modulates shoulders & neck (hips/feet are 100% frozen)
+	-- Grounded Breathing: ONLY modulates shoulders & neck
 	local chestBreath = math.sin(now * 2.2) * 0.02
 	local neckDrift = math.sin(now * 1.5) * 0.015
 
 	-- 1. Apply to Human Avatar
 	for jointName, targetCF in pairs(item.PlayerJoints) do
-		local joint = (torso and torso:FindFirstChild(jointName)) or (root and root:FindFirstChild(jointName))
-		if joint and joint:IsA("Motor6D") then
+		local joint = findJointByName(char, jointName)
+		if joint then
 			local startCF = startPlayerCF[jointName] or targetCF
 			local blendedCF = startCF:Lerp(targetCF, smoothAlpha)
 			activePlayerCF[jointName] = blendedCF
 
 			if jointName == "Neck" then
 				joint.Transform = blendedCF * CFrame.Angles(neckDrift, 0, 0)
-			elseif jointName == "Right Shoulder" or jointName == "Left Shoulder" then
+			elseif jointName:find("Shoulder") then
 				joint.Transform = blendedCF * CFrame.new(0, chestBreath, 0)
 			else
 				joint.Transform = blendedCF
@@ -961,27 +1000,24 @@ RunService.Stepped:Connect(function()
 	-- 2. Apply to Stand Entity
 	if standEntity and root then
 		local sRoot = standEntity:FindFirstChild("HumanoidRootPart")
-		local sTorso = standEntity:FindFirstChild("Torso")
-
-		-- Position Stand by Stance
 		if sRoot then
 			local offset = (item.Stance == "EMBRACE") and CFrame.new(0, 0.1, 0.65) or CFrame.new(2.5, 1.5, 2.5)
 			sRoot.CFrame = root.CFrame * offset
 		end
 
-		-- Fallback Rule: If StandJoints has no entries, mirror player's pose 1:1
+		-- Fallback: If StandJoints is empty, mirror player pose
 		local standSource = (next(item.StandJoints) ~= nil) and item.StandJoints or item.PlayerJoints
 
 		for jointName, targetCF in pairs(standSource) do
-			local joint = (sTorso and sTorso:FindFirstChild(jointName)) or (sRoot and sRoot:FindFirstChild(jointName))
-			if joint and joint:IsA("Motor6D") then
+			local joint = findJointByName(standEntity, jointName)
+			if joint then
 				local startCF = startStandCF[jointName] or targetCF
 				local blendedCF = startCF:Lerp(targetCF, smoothAlpha)
 				activeStandCF[jointName] = blendedCF
 
 				if jointName == "Neck" then
 					joint.Transform = blendedCF * CFrame.Angles(neckDrift, 0, 0)
-				elseif jointName == "Right Shoulder" or jointName == "Left Shoulder" then
+				elseif jointName:find("Shoulder") then
 					joint.Transform = blendedCF * CFrame.new(0, chestBreath, 0)
 				else
 					joint.Transform = blendedCF
@@ -992,4 +1028,4 @@ RunService.Stepped:Connect(function()
 end)
 
 refreshPlaylistUI()
-refreshModeButtons() 
+refreshModeButtons()
